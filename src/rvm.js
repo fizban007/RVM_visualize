@@ -31,6 +31,7 @@ var Config = function () {
   this.o_mode = true;
   this.rotating = false;
   this.lock_observer = true;
+  this.height = 1.0;
 }
 var conf = new Config();
 var q_dipole = new THREE.Quaternion();
