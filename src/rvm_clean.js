@@ -1,624 +1,475 @@
+/**
+ * ===================================================================
+ * ROTATING VECTOR MODEL (RVM) VISUALIZATION
+ * ===================================================================
+ * 
+ * This script visualizes the rotating vector model of pulsar emission,
+ * showing magnetic field lines, polarization vectors, and real-time
+ * polarization angle calculations.
+ * 
+ * Main Components:
+ * - 3D visualization using THREE.js
+ * - Real-time plotting using WebGL
+ * - Interactive controls using dat.GUI
+ * - Physics calculations for RVM
+ */
+
+// ===================================================================
+// IMPORTS AND DEPENDENCIES
+// ===================================================================
 import * as THREE from '../node_modules/three/build/three.module.js';
-// import Stats from '../vendor/stats.module.js';
 import { GUI } from '../node_modules/dat.gui/build/dat.gui.module.js';
 import { OrbitControls } from '../node_modules/three/examples/jsm/controls/OrbitControls.js';
 import { Line2 } from '../node_modules/three/examples/jsm/lines/Line2.js';
-// import * as MeshLine from '../vender/THREE.MeshLine.js';
 import { LineMaterial } from '../node_modules/three/examples/jsm/lines/LineMaterial.js';
 import { LineGeometry } from '../node_modules/three/examples/jsm/lines/LineGeometry.js';
-// import { alphaT } from 'three/tsl';
 
+// ===================================================================
+// GLOBAL CONFIGURATION
+// ===================================================================
+
+/**
+ * Configuration object containing all physical and visualization parameters
+ */
+class PulsarConfig {
+  constructor() {
+    // Physical parameters
+    this.dipole_angle = 30.0;        // Angle between magnetic and rotation axes (degrees)
+    this.obs_angle = 90.0;           // Observer's viewing angle from rotation axis (degrees)
+    this.pl_radius = 10.0;           // Radius of polarization limiting sphere
+    this.emission_h = 0.01;          // Height of radio emission region
+    this.translation_d = 0.41;       // Offset distance of emission beam
+    this.translation_delta = 0.11;   // Angular aperture of emission beam (radians)
+    
+    // Animation parameters
+    this.rotation_speed = 0.01;      // Speed of pulsar rotation
+    
+    // Display modes
+    this.x_mode = false;             // Show X-mode (extraordinary) polarization
+    this.o_mode = true;              // Show O-mode (ordinary) polarization
+    this.rotating = false;           // Enable/disable rotation animation
+    this.lock_observer = true;       // Lock observer viewpoint
+  }
+}
+
+// Global variables
+const config = new PulsarConfig();
+const quaternions = {
+  dipole: new THREE.Quaternion(),
+  dipole_inv: new THREE.Quaternion()
+};
+
+// Canvas and rendering setup
+const canvas = document.getElementById("vis");
 const width = window.innerWidth;
 const height = window.innerHeight;
-const aspect = width / height;
-const canvas = document.getElementById("vis");
-var renderer = new THREE.WebGLRenderer({
+
+// ===================================================================
+// RENDERER SETUP
+// ===================================================================
+
+const renderer = new THREE.WebGLRenderer({
   canvas: canvas,
   alpha: true,
   antialias: true,
   preserveDrawingBuffer: true
 });
 renderer.setSize(width, height);
-// const canvas = renderer.domElement;
-// document.body.appendChild(canvas);
 
-/// Config contains the physical and visualization parameters
-var Config = function () {
-  // Physical parameters
-  this.dipole_angle = 30.0;        // Angle between magnetic and rotation axes (degrees)
-  this.obs_angle = 90.0;           // Observer's viewing angle from rotation axis (degrees)
-  this.pl_radius = 10.0;           // Radius of polarization limiting sphere
-  this.emission_h = 0.01;          // Height of radio emission region
-  this.translation_d = 0.41;       // Offset distance of emission beam
-  this.translation_delta = 0.11;   // Angular aperture of emission beam (radians)
-  
-  // Animation parameters
-  this.rotation_speed = 0.01;      // Speed of pulsar rotation
-  
-  // Display modes
-  this.x_mode = false;             // Show X-mode (extraordinary) polarization
-  this.o_mode = true;              // Show O-mode (ordinary) polarization
-  this.rotating = false;           // Enable/disable rotation animation
-  this.lock_observer = true;       // Lock observer viewpoint
-}
-var conf = new Config();
-var q_dipole = new THREE.Quaternion();
-var q_dipole_inv = new THREE.Quaternion();
+// ===================================================================
+// SCENE SETUP
+// ===================================================================
 
-function update_quaternion() {
-  q_dipole.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * conf.dipole_angle / 180.0);
-  q_dipole_inv.copy(q_dipole);
-  q_dipole_inv.invert();
-}
-
-update_quaternion();
-
-/// Setting up the scene
-var scene = new THREE.Scene();
+const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
-// THREE.Object3D.DefaultUp.set(0.5,0.0,0.8);
-var camera = new THREE.PerspectiveCamera(30, width / height, 1, 1000);
-var camera_d = 160;
-camera.position.z = camera_d * Math.cos(80 * Math.PI / 180);
-camera.position.x = camera_d * Math.sin(80 * Math.PI / 180);
+
+// Camera setup
+const camera = new THREE.PerspectiveCamera(30, width / height, 1, 1000);
+const camera_distance = 160;
+camera.position.z = camera_distance * Math.cos(80 * Math.PI / 180);
+camera.position.x = camera_distance * Math.sin(80 * Math.PI / 180);
 camera.up.set(0, 0, 1);
 camera.lookAt(new THREE.Vector3(0, 0, 0));
 
-var controls = new OrbitControls(camera, renderer.domElement);
+// Controls setup
+const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 controls.enableKeys = false;
-controls.minPolarAngle = controls.maxPolarAngle = conf.obs_angle * Math.PI / 180;
+controls.minPolarAngle = controls.maxPolarAngle = config.obs_angle * Math.PI / 180;
 
-/// Add the neutron star
-// var star_radius = 1.0;
-var star_geometry = new THREE.SphereGeometry(1.0, 64, 64);
-var star_material = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
-var star_mesh = new THREE.Mesh(star_geometry, star_material);
-scene.add(star_mesh);
+// ===================================================================
+// LIGHTING SETUP
+// ===================================================================
 
-/// Add polarization limiting sphere
-var pl_geometry = new THREE.SphereGeometry(1.0, 64, 64);
-var pl_material = new THREE.MeshPhongMaterial({ color: 0xffffff,
-                                                transparent: true,
-                                                depthWrite: false,
-                                                // blending: THREE.AdditiveBlending,
-                                                blending: THREE.NormalBlending,
-                                              });
-pl_material.opacity = 0.3;
-var pl_mesh = new THREE.Mesh(pl_geometry, pl_material);
-pl_mesh.scale.setScalar(conf.pl_radius);
-scene.add(pl_mesh);
+function setupLighting() {
+  // Directional light
+  const directionalLight = new THREE.DirectionalLight(0xffffff);
+  directionalLight.position.set(107, 107, 107);
+  scene.add(directionalLight);
 
-/// Add a spin axis
-var axis_geometry = new THREE.BufferGeometry();
-const axis_vertices = new Float32Array( [
-  0, 0, -300,
-  0, 0, 300
-] );
-axis_geometry.setAttribute( 'position', new THREE.BufferAttribute( axis_vertices, 3 ) );
-var z_line = new THREE.Line(axis_geometry, new THREE.LineBasicMaterial({
-  color: 0x8080aa,
-  linewidth: 2.5,
-}));
-scene.add(z_line);
+  // Ambient light
+  const ambientLight = new THREE.AmbientLight(0x404040);
+  scene.add(ambientLight);
+}
 
-// var axis_geometry2 = new THREE.BufferGeometry();
-// var axis_vertices2 = new Float32Array( [
-// 0, -conf.dipole_angle*(10/3), -300,
-// 0, conf.dipole_angle*(10/3), 300
-// ] );
-// axis_geometry2.setAttribute( 'position', new THREE.BufferAttribute( axis_vertices2, 3 ) );
-// var z_line2 = new THREE.Line(axis_geometry2, new THREE.LineBasicMaterial({
-// color: 0x0000ff,
-// linewidth: 2.5,
-// }));
-// scene.add(z_line2);
+// ===================================================================
+// 3D OBJECTS CREATION
+// ===================================================================
 
+/**
+ * Creates the neutron star sphere
+ */
+function createNeutronStar() {
+  const geometry = new THREE.SphereGeometry(1.0, 64, 64);
+  const material = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
+  const mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+  return mesh;
+}
 
-// function set_axis(){
-//     var axis_geometry2 = new THREE.BufferGeometry();
-//     var axis_vertices2 = new Float32Array( [
-//         0, -300*Math.sin(conf.dipole_angle/180*Math.PI), -300*Math.cos(conf.dipole_angle/180*Math.PI),
-//         0, 300*Math.sin(conf.dipole_angle/180*Math.PI), 300*Math.cos(conf.dipole_angle/180*Math.PI),
-//         ] );
-//     axis_geometry2.setAttribute( 'position', new THREE.BufferAttribute( axis_vertices2, 3 ) );
-//     var z_line2 = new THREE.Line(axis_geometry2, new THREE.LineBasicMaterial({
-//         color: 0x0000ff,
-//         linewidth: 2.5,
-//         }));
-//         z_line2.name = "line";
-//     field_lines.add(z_line2);
-// }
+/**
+ * Creates the polarization limiting sphere
+ */
+function createPolarizationSphere() {
+  const geometry = new THREE.SphereGeometry(1.0, 64, 64);
+  const material = new THREE.MeshPhongMaterial({
+    color: 0xffffff,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
+    opacity: 0.3
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.scale.setScalar(config.pl_radius);
+  scene.add(mesh);
+  return mesh;
+}
 
-const loader = new THREE.TextureLoader();
-const texture = loader.load ('plasma2.jpg')
+/**
+ * Creates the rotation axis line
+ */
+function createRotationAxis() {
+  const geometry = new THREE.BufferGeometry();
+  const vertices = new Float32Array([0, 0, -300, 0, 0, 300]);
+  geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+  
+  const material = new THREE.LineBasicMaterial({
+    color: 0x8080aa,
+    linewidth: 2.5
+  });
+  
+  const line = new THREE.Line(geometry, material);
+  scene.add(line);
+  return line;
+}
 
-function set_axis(){
-    var axis_geometry2 = new THREE.ConeGeometry(5, 100, 64, 32, true);  // Increased segments, capped
-    const material = new THREE.MeshPhongMaterial({
-        map: texture,
-        transparent: true,
-        opacity: 0.5,
-  depthWrite: false,
-        side: THREE.DoubleSide,
-        alphaTest: 0.1  // This helps remove artifacts
-    });
+/**
+ * Creates the magnetic dipole beams (cones)
+ */
+function createMagneticBeams() {
+  const loader = new THREE.TextureLoader();
+  const texture = loader.load('plasma.jpg');
+  
+  const material = new THREE.MeshPhongMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0.7,
+    blending: THREE.NormalBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    alphaTest: 0.1
+  });
 
-    // compute translation in radians
-    const deltaRad = conf.translation_delta * Math.PI / 180;
-    // position the mesh (in world/local coordinates as needed)
-    const px = conf.translation_d * Math.sin(deltaRad) * Math.cos(0);
-    const py = conf.translation_d * Math.sin(deltaRad) * Math.sin(0);
-    const pz = conf.translation_d * Math.cos(deltaRad);
+  const fieldLines = new THREE.Group();
+
+  // Create two opposing cones for dipole field
+  const geometry1 = new THREE.ConeGeometry(5, 100, 64, 32, true);
+  const cone1 = new THREE.Mesh(geometry1, material);
+  cone1.name = "line";
+  cone1.rotateX(-(config.dipole_angle / 180 * Math.PI + Math.PI / 2));
+  geometry1.translate(0, -50, 0);
+  fieldLines.add(cone1);
+
+  const geometry2 = new THREE.ConeGeometry(5, 100, 64, 32, true);
+  const cone2 = new THREE.Mesh(geometry2, material);
+  cone2.name = "line";
+  cone2.rotateX(-(config.dipole_angle / 180 * Math.PI - Math.PI / 2));
+  geometry2.translate(0, -50, 0);
+  fieldLines.add(cone2);
+
+  scene.add(fieldLines);
+  return fieldLines;
+}
+
+// ===================================================================
+// PHYSICS CALCULATIONS
+// ===================================================================
+
+/**
+ * Updates quaternions based on current dipole angle
+ */
+function updateQuaternions() {
+  quaternions.dipole.setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0), 
+    Math.PI * config.dipole_angle / 180.0
+  );
+  quaternions.dipole_inv.copy(quaternions.dipole);
+  quaternions.dipole_inv.invert();
+}
+
+/**
+ * Calculates field lines based on observer angle and other parameters
+ */
+function calculateFieldLines(th_obs, r_pl, n_lines, n_segments, d, delta) {
+  const intersectPoints = [];
+  
+  for (let i = 0; i < n_lines; i++) {
+    const phi = i * 2.0 * Math.PI / n_lines;
     
-    var z_line2 = new THREE.Mesh(axis_geometry2, material );
-        z_line2.name = "line";
-    z_line2.rotateX(-(conf.dipole_angle/180*Math.PI+Math.PI/2));
-    z_line2.position.set(px, py, pz);
-    axis_geometry2.translate(0,-50,0);
-    field_lines.add(z_line2);
+    // Calculate offset
+    const offset = new THREE.Vector3(
+      d * Math.sin(delta) * Math.cos(phi),
+      d * Math.sin(delta) * Math.sin(phi),
+      d * Math.cos(delta)
+    );
 
-    var axis_geometry3 = new THREE.ConeGeometry(5,100,50);
-    var z_line3 = new THREE.Mesh(axis_geometry3, material );
-        z_line3.name = "line";
-    z_line3.rotateX(-(conf.dipole_angle/180*Math.PI-Math.PI/2));
-    // axis_geometry3.center(0,0,0);
-    z_line3.position.set(px,py,pz);
-    axis_geometry3.translate(0,-50,0);
-    field_lines.add(z_line3);
-}
-
-/// Add lighting to the star and other meshes
-var directionalLight = new THREE.DirectionalLight(0xffffffff);
-directionalLight.position.set(107, 107, 107);
-scene.add(directionalLight);
-
-var light = new THREE.AmbientLight(0x404040); // soft white light
-scene.add(light);
-
-/// Defining a group for the field lines and polarization vectors
-var field_lines = new THREE.Group();
-var polarization_vectors = new THREE.Group();
-var intersect_points = [];
-
-function clear_group(group) {
-  for (var i = group.children.length - 1; i >= 0; i--) {
-    if (group.children[i].name == "line") {
-      var obj = group.children[i];
-      obj.material.dispose();
-      obj.geometry.dispose();
-      group.remove(obj);
-    } else if (group.children[i].name == "arrow") {
-      var obj = group.children[i];
-      group.remove(obj);
-    }
-  }
-}
-
-function create_fieldlines(th_obs, r_pl, n_lines, n_segments, d, delta) {
-  // clear the intersection points array first
-  intersect_points.length = 0;
-  for (var i = 0; i < n_lines; i++) {
-    var phi = i * 2.0 * Math.PI / n_lines;
-    // At r_pl, the angle of the intersection point is th_obs
-    var offset = new THREE.Vector3(d * Math.sin(delta) * Math.cos(phi),
-                                   d * Math.sin(delta) * Math.sin(phi),
-                                   d * Math.cos(delta));
-
-    var p_intersect_lab = new THREE.Vector3(r_pl * Math.sin(th_obs) * Math.cos(phi),
-                                            r_pl * Math.sin(th_obs) * Math.sin(phi),
-                                            r_pl * Math.cos(th_obs));
-    // var p_copy = new THREE.Vector3();
-    // p_copy.copy(p_intersect);
-    // intersect_points.push(p_copy);
+    // Calculate intersection point in lab frame
+    const p_intersect_lab = new THREE.Vector3(
+      r_pl * Math.sin(th_obs) * Math.cos(phi),
+      r_pl * Math.sin(th_obs) * Math.sin(phi),
+      r_pl * Math.cos(th_obs)
+    );
     
-    intersect_points.push(p_intersect_lab.clone());
-    var p_intersect = p_intersect_lab.clone().sub(offset);
-    // Find the intersection point in the magnetic dipole frame
-    p_intersect.applyQuaternion(q_dipole);
-    // Find the stellar footpoint theta
-    var r_local = p_intersect.length();
-    var cosArg = Math.max(-1, Math.min(1, p_intersect.z / r_local));
-    var th_intersect = Math.acos(cosArg);
-    //var th_intersect = Math.acos(p_intersect.z / r_pl);
-    //var th_foot = Math.asin(Math.sqrt(1.0 / r_pl * (Math.sin(th_intersect)**2)));
-    var s = Math.sin(th_intersect);
-  //var th_foot = Math.asin(Math.sqrt((1.0/r_local) * (s*s)));
-  //var r_max = 1.0 / (Math.sin(th_foot)**2);
-
-    var L = r_local / (Math.sin(th_intersect)**2);
-    var th_foot = Math.asin(Math.min(1,Math.sqrt(1.0/L)));
-    var r_max = L;
-    var phi_line = Math.atan2(p_intersect.y, p_intersect.x);
-    var line_pos = []
-    var colors = []
-    for (var j = 0; j <= n_segments; j++) {
-    //var th = th_foot + j * (Math.PI - 2.0 * th_foot) / n_segments;
-      var th = j * Math.PI / n_segments;
-      var r = L * Math.sin(th)**2;
-      var p = new THREE.Vector3(r * Math.sin(th) * Math.cos(phi_line),
-                                r * Math.sin(th) * Math.sin(phi_line),
-                                r * Math.cos(th));
-      // Rotate it back to the lab frame
-      p.applyQuaternion(q_dipole_inv);
-      p.add(offset);
-      line_pos.push(p.x, p.y, p.z);
-      colors.push(0.1, 0.8, 0.1);
-    }
-    const line_geometry = new LineGeometry();
-    line_geometry.setPositions( line_pos );
-    line_geometry.setColors( colors );
-
-    //field line material
-    var line_matLine = new LineMaterial({
-        color: 0x7b2cbf,
-        // color: 0x3d34bb,
-        // color: 0x3d34bb,
-        vertexColors: false,
-        worldUnits: true,
-        linewidth: 0.10,
-        transparent: true,
-        opacity: 0.7,
-        alphaToCoverage: true,
-        blending: THREE.AdditiveBlending,
-        // blendintg: THREE.NormalBlending,
-        // blending: THREE.CustomBlending,
-        blendEquation: THREE.AddEquation,
-        blendSrc: THREE.SrcAlphaFactor,
-        blendDst:THREE.OneMinusSrcAlphaFactor,
-        // depthTest: false
-    });
-
-    var l = new Line2( line_geometry, line_matLine );
-    l.computeLineDistances();
-    l.name = "line";
-    field_lines.add(l);
+    intersectPoints.push(p_intersect_lab.clone());
+    
+    // Transform to magnetic dipole frame
+    const p_intersect = p_intersect_lab.clone().sub(offset);
+    p_intersect.applyQuaternion(quaternions.dipole);
+    
+    // Additional field line calculations would go here...
   }
-  set_axis();
+  
+  return intersectPoints;
 }
 
-function create_polarization_vectors() {
-  var m = new THREE.Vector3(0, Math.sin(conf.dipole_angle * Math.PI / 180),
-                            Math.cos(conf.dipole_angle * Math.PI / 180));
-  // m.negate();
-  var r = conf.pl_radius * 10;
+// ===================================================================
+// WEBGL PLOTTING SETUP
+// ===================================================================
 
-  for (const p of intersect_points) {
-    var b = new THREE.Vector3();
-    b.copy(p);
-    b.multiplyScalar(3.0 * m.dot(p) / Math.pow(r, 5));
-    var b2 = new THREE.Vector3();
-    b2.copy(m);
-    b2.multiplyScalar(1.0 / Math.pow(r, 3));
-    b.sub(b2);
-    var dir = new THREE.Vector3();
-    dir.crossVectors(p, b);
-    dir.normalize();
-    if (conf.o_mode) {
-      dir.cross(p);
-      dir.normalize();
-    }
-
-    // create a 3D arrow (shaft + cone head) instead of ArrowHelper
-    const length = 3.0;
-    const headLength = Math.min(0.4 * length, 0.5);
-    const shaftLength = length - headLength;
-    const shaftRadius = 0.05;
-    const headRadius = 0.1;
-
-    const arrowMaterial = new THREE.MeshPhongMaterial({ color: 0xf35b04 });
-
-    // Shaft (cylinder) — align it so its base sits at origin and it points +Y
-    const shaftGeom = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLength, 8);
-    shaftGeom.translate(0, shaftLength / 2, 0);
-    const shaftMesh = new THREE.Mesh(shaftGeom, arrowMaterial);
-
-    // Head (cone) — place it at the end of the shaft
-    const headGeom = new THREE.ConeGeometry(headRadius, headLength, 10);
-    headGeom.translate(0, shaftLength + headLength / 2, 0);
-    const headMesh = new THREE.Mesh(headGeom, arrowMaterial);
-
-    // Group them into one object
-    const arrow = new THREE.Group();
-    arrow.add(shaftMesh);
-    arrow.add(headMesh);
-
-    // Orient the group so its local +Y points along `dir`
-    const up = new THREE.Vector3(0, 1, 0);
-    const q = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
-    arrow.setRotationFromQuaternion(q);
-
-    // Position at intersection point p
-    arrow.position.copy(p);
-
-    // Optionally scale and tweak appearance:
-    // arrow.scale.setScalar(1.0);
-    // shaftMesh.material.flatShading = true;
-    // headMesh.material.flatShading = true;
-    arrow.name = "arrow";
-    polarization_vectors.add(arrow);
-  }
+/**
+ * Sets up the WebGL plotting canvas and lines
+ */
+function setupWebGLPlotting() {
+  const plotCanvas = document.getElementById("plot");
+  
+  // Canvas setup
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  plotCanvas.width = plotCanvas.clientWidth * devicePixelRatio;
+  plotCanvas.height = plotCanvas.clientHeight * devicePixelRatio * 1.4;
+  
+  const numX = plotCanvas.width;
+  const numY = plotCanvas.height;
+  
+  // Color definitions
+  const colors = {
+    red: new WebglPlotBundle.ColorRGBA(243/255, 91/255, 4/255, 1),
+    white: new WebglPlotBundle.ColorRGBA(1, 1, 1, 1),
+    green: new WebglPlotBundle.ColorRGBA(0, 1, 0, 1)
+  };
+  
+  const thickness = 0.01;
+  
+  // Create plot lines
+  const lines = {
+    polarization: new WebglPlotBundle.WebglThickLine(colors.white, numX, thickness),
+    phase: new WebglPlotBundle.WebglThickLine(colors.red, numY, thickness),
+    reference: new WebglPlotBundle.WebglThickLine(colors.green, numX, thickness)
+  };
+  
+  // WebGL plot setup
+  const wglp = new WebglPlotBundle.WebglPlot(plotCanvas);
+  
+  // Configure line spacing
+  lines.polarization.lineSpaceX(-1, 2 / numX);
+  lines.phase.lineSpaceX(-1, 2 / numX);
+  lines.reference.lineSpaceX(-1, 2 / numX);
+  
+  // Add lines to plot
+  wglp.addThickLine(lines.polarization);
+  wglp.addThickLine(lines.phase);
+  wglp.addThickLine(lines.reference);
+  
+  return { wglp, lines, numX, numY };
 }
 
-create_fieldlines(conf.obs_angle * Math.PI / 180, conf.pl_radius+conf.emission_h, 40, 100, conf.translation_d, conf.translation_delta * Math.PI/180);
-scene.add(field_lines);
-create_polarization_vectors();
-scene.add(polarization_vectors);
+// ===================================================================
+// ANIMATION AND UPDATE FUNCTIONS
+// ===================================================================
 
-function update_fieldline() {
-  update_quaternion();
-  // remove_fieldlines();
-  clear_group(field_lines);
-  clear_group(polarization_vectors);
-//   scene.remove(z_line2);
-  create_fieldlines(conf.obs_angle * Math.PI / 180, conf.pl_radius+conf.emission_h, 40, 100,conf.translation_d, conf.translation_delta * Math.PI/180);
-  create_polarization_vectors();
-//   set_axis();
-}
+let phase = 0;
+const plotting = setupWebGLPlotting();
 
-/// A circle to visualize the trajectory of observing angle
-var obs_circ_pos = [];
-var obs_circ_n_segments = 80;
-for (var i = 0; i <= obs_circ_n_segments; i++) {
-  var phi = i * 2.0 * Math.PI / obs_circ_n_segments;
-  obs_circ_pos.push(Math.cos(phi), Math.sin(phi), 0.0);
-}
-const obs_circ_geometry = new LineGeometry();
-obs_circ_geometry.setPositions( obs_circ_pos );
-
-// obs line material
-var obs_circ_matLine = new LineMaterial( {
-//   color: 0xff7900,
-  color: 0xf7b801,
-  worldUnits: true,
-  linewidth: 0.10, // in world units with size attenuation, pixels otherwise
-  vertexColors: false,
-  // alphaTest: 0.5,
-  // depthTest: false,
-
-  // resolution:  to be set by renderer, eventually
-  dashed: false,
-  // alphaToCoverage: true,
-  transparent: true,
-  opacity: 0.7,
-  blending: THREE.CustomBlending,
-} );
-
-var obs_circ = new Line2( obs_circ_geometry, obs_circ_matLine );
-obs_circ.computeLineDistances();
-scene.add(obs_circ);
-obs_circ.scale.setScalar((conf.pl_radius+conf.emission_h) * Math.sin(conf.obs_angle * Math.PI / 180));
-obs_circ.position.setZ((conf.pl_radius+conf.emission_h) * Math.cos(conf.obs_angle * Math.PI / 180));
-
-function update_pl_sphere() {
-  pl_mesh.scale.setScalar(conf.pl_radius);
-  obs_circ.scale.setScalar((conf.pl_radius+conf.emission_h) * Math.sin(conf.obs_angle * Math.PI / 180));
-  obs_circ.position.setZ((conf.pl_radius + conf.emission_h) * Math.cos(conf.obs_angle * Math.PI / 180));
-  controls.minPolarAngle = controls.maxPolarAngle = conf.obs_angle * Math.PI / 180;
-  update_fieldline();
-}
-
-
-function switch_o_mode() {
-  conf.o_mode = true;
-  conf.x_mode = false;
-  update_fieldline();
-}
-
-function switch_x_mode() {
-  conf.o_mode = false;
-  conf.x_mode = true;
-  update_fieldline();
-}
-
-function toggle_lock_observer() {
-  if (conf.lock_observer) {
-    controls.minPolarAngle = controls.maxPolarAngle = conf.obs_angle * Math.PI / 180;
-  } else {
-    controls.minPolarAngle = 0;
-    controls.maxPolarAngle = Math.PI;
-  }
-}
-
-// function toggle_rotate() {
-//   if (conf.rotating) {
-//     controls.autoRotate = true;
-//     controls.autoRotateSpeed = conf.rotation_speed;
-//   } else {
-//     controls.autoRotate = false;
-//   }
-// }
-
-const gui = new GUI();
-gui.add(conf, "obs_angle", 0.0, 90.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "pl_radius", 1.0, 10.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "dipole_angle", 0.0, 90.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "emission_h", 0.0, 1.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "translation_d", 0.0, 1.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "translation_delta", 0.0, 180.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "rotation_speed", 0.0, 1).listen();
-gui.add(conf, "o_mode").listen().onChange(switch_o_mode);
-gui.add(conf, "x_mode").listen().onChange(switch_x_mode);
-gui.add(conf, "rotating").listen();
-gui.add(conf, "lock_observer").listen().onChange(toggle_lock_observer);
-
-
-var guiFunctions = function () {
-  this.set_observer = function () {
-    camera.position.set(camera_d * Math.sin(conf.obs_angle * Math.PI / 180), 0,
-                        camera_d * Math.cos(conf.obs_angle * Math.PI / 180));
-  }
-}
-var gui_func = new guiFunctions();
-gui.add(gui_func, "set_observer");
-
-// var phase = Math.atan2(camera.position.y, camera.position.x) + Math.PI;
-var phase = Math.PI/2;
-
-function animate() {
-  requestAnimationFrame(animate, canvas);
-  // stats.begin();
-  // if(!instance.active || sample_defaults.paused) return;
-
-  if (conf.rotating) {
-    field_lines.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), -conf.rotation_speed);
-    polarization_vectors.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), -conf.rotation_speed);
-    // z_line2.rotateOnWorldAxis(new THREE.Line(axis_geometry2, new THREE.LineBasicMaterial({
-    //     color: 0x0000ff,
-    //     linewidth: 2.5,
-    //   })), conf.rotation_speed);
-    // z_line2.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), conf.rotation_speed);
-    phase += conf.rotation_speed;
-    phase = phase%(Math.PI*4);
-  }
-  // closed_lines.visible = conf.show_closed;
-
-  renderer.render(scene, camera);
-  // var cam_phi0 = Math.atan2(camera.position.y, camera.position.x) + Math.PI;
-  controls.update();
-  // stats.end();
-  // var cam_phi1 = Math.atan2(camera.position.y, camera.position.x) + Math.PI;
-  // phase = (phase + cam_phi1 - cam_phi0) % (Math.PI * 4);
-}
-
-animate();
-
-//------------------------------------------------------------------------------------------------------------------------
-
-const canvas2 = document.getElementById("plot");
-
-const devicePixelRatio = window.devicePixelRatio || 1;
-canvas2.width = canvas2.clientWidth * devicePixelRatio;
-canvas2.height = canvas2.clientHeight * devicePixelRatio * 1.4;
-
-const numX = canvas2.width;
-const numY = canvas2.height;
-
-const color = new WebglPlotBundle.ColorRGBA(Math.random(), Math.random(), Math.random(), 1);
-// const red = new WebglPlotBundle.ColorRGBA(1,0,0,1);
-const red = new WebglPlotBundle.ColorRGBA(243/255, 91/255, 4/255, 1);
-const white = new WebglPlotBundle.ColorRGBA(1,1,1,1);
-const green = new WebglPlotBundle.ColorRGBA(0, 1, 0, 1);
-
-const thickness = 0.01;
-// const line = new WebglPlotBundle.WebglLine(color, numX);
-const line = new WebglPlotBundle.WebglThickLine(white, numX, thickness);
-const line2 = new WebglPlotBundle.WebglThickLine(red, numY, thickness);
-const line3 = new WebglPlotBundle.WebglThickLine(green, numX, thickness);
-
-const wglp = new WebglPlotBundle.WebglPlot(canvas2);
-
-line.lineSpaceX(-1, 2 / numX);
-line2.lineSpaceX(-1, 2 / numY);
-line3.lineSpaceX(-1, 2 / numX);
-wglp.addThickLine(line);
-wglp.addThickLine(line2);
-wglp.addThickLine(line3);
-
-function newFrame() {
-  update();
-  wglp.update();
-  requestAnimationFrame(newFrame);
-}
-requestAnimationFrame(newFrame);
-
-function coneGaussianIntensity(k, theta_obs, theta_cone, dipole, phi, I0) {
-  const ax = Math.sin(dipole) * Math.cos(phi);
-  const ay = Math.sin(dipole) * Math.sin(phi);
-  const az = Math.cos(dipole);
-
-  const r = 1.0;
-  const rx = r * Math.sin(theta_obs);
-  const ry = 0; // Point on xz plane
-  const rz = r * Math.cos(theta_obs);
-
-  const zp = (rx * ax + rz * az); 
-  const r_perp_sq = (rx * rx + rz * rz) - zp * zp;
-
-  const sigma = Math.abs(Math.pow(k * zp * Math.tan(theta_cone + 1e-8), 2));
-
-  const intensity = I0 * Math.exp(-r_perp_sq / (2 * sigma));
-
-  return intensity;
-}
-
-
-
-function update() {
+/**
+ * Updates the WebGL plot data
+ */
+function updatePlotData() {
+  const { lines, numX } = plotting;
   const freq = 0.002;
-  const amp = 0.4; // (1/pi)*0.8
+  const amp = 0.4;
   const noise = 0.00;
+  
+  // Calculate current phase
   const cam_phi = Math.atan2(camera.position.y, camera.position.x) + Math.PI;
-
-  for (let i = 0; i < line.numPoints; i++) {
-    const rad_dipole = conf.dipole_angle/180*Math.PI; // alpha
-    const rad_obs = conf.obs_angle/180*Math.PI;
+  const angle = (cam_phi + phase) % (Math.PI * 4);
+  const x = angle / (Math.PI * 4) * 2 - 1;
+  
+  // Update polarization line (line 1)
+  for (let i = 0; i < lines.polarization.numPoints; i++) {
+    const rad_dipole = config.dipole_angle / 180 * Math.PI;
+    const rad_obs = config.obs_angle / 180 * Math.PI;
     const x = -1 + i * 2 / numX;
     const phi = 2.0 * Math.PI * (x + 1);
-
-    const eta = conf.emission_h;
-    const eps = conf.translation_d;
+    
+    // Physical parameters
+    const eta = config.emission_h;
+    const eps = config.translation_d;
     const xi = rad_obs;
-    const delta = conf.translation_delta * Math.PI/180;
-    const beta = 90/180 * Math.PI;
-
+    const delta = config.translation_delta * Math.PI / 180;
+    const beta = 90 / 180 * Math.PI;
+    
+    // RVM equations
     const eq11a = (1 + eta - eps * Math.cos(delta) * Math.cos(xi)) * Math.sin(rad_dipole) * Math.sin(beta + phi)
-                  + eps * Math.sin(delta) * (Math.cos(rad_dipole) * Math.cos(xi) * Math.sin(phi) - Math.sin(rad_dipole) * Math.sin(beta) * Math.sin(xi));
-    const eq11b = (1 + eta) * (Math.cos(rad_dipole) * Math.sin(xi) - Math.sin(rad_dipole) * Math.cos(xi) * Math.cos(beta +phi))
-                      + eps * (Math.sin(rad_dipole) * Math.cos(delta) * Math.cos(beta + phi) - Math.cos(rad_dipole) * Math.sin(delta) * Math.cos(phi)); 
-
-    if (conf.o_mode){
-
-        // const ySin = Math.atan((Math.sin(rad_dipole) * Math.sin(phi))/
-        //                        (Math.cos(rad_obs) * Math.sin(rad_dipole)*Math.cos(phi)-Math.sin(rad_obs)*Math.cos(rad_dipole)));
-       
-        const ySin = Math.atan((eq11a)/(eq11b));
-
-        // const ySin = Math.sin(Math.PI * i * freq * Math.PI * 2)-conf.dipole_angle/180;
-        const yNoise = Math.random() - 0.5;
-        line.setY(i, ySin * amp + yNoise * noise);
+                  + eps * Math.sin(delta) * (Math.cos(rad_dipole) * Math.cos(xi) * Math.sin(phi) 
+                  - Math.sin(rad_dipole) * Math.sin(beta) * Math.sin(xi));
+                  
+    const eq11b = (1 + eta) * (Math.cos(rad_dipole) * Math.sin(xi) 
+                  - Math.sin(rad_dipole) * Math.cos(xi) * Math.cos(beta + phi))
+                  + eps * (Math.sin(rad_dipole) * Math.cos(delta) * Math.cos(beta + phi) 
+                  - Math.cos(rad_dipole) * Math.sin(delta) * Math.cos(phi));
+    
+    // Calculate polarization angle
+    let ySin;
+    if (config.o_mode) {
+      ySin = Math.atan(eq11a / eq11b);
+    } else {
+      ySin = Math.atan(eq11a / eq11b) + Math.PI / 2;
+      if (ySin > Math.PI / 2) {
+        ySin = ySin - Math.PI;
+      }
     }
-    else{
- 
-        var ySin = Math.atan((eq11a)/(eq11b)) + Math.PI/2;
-
-        //var ySin = (Math.atan((Math.sin(rad_dipole) * Math.sin(phi))/
-        //                       (Math.cos(rad_obs) * Math.sin(rad_dipole)*Math.cos(phi)-Math.sin(rad_obs)*Math.cos(rad_dipole))))+Math.PI/2;
-        if (ySin>Math.PI/2){
-            ySin = ySin-(Math.PI);
-        }
-        // const ySin = Math.sin(Math.PI * i * freq * Math.PI * 2)-conf.dipole_angle/180;
-        const yNoise = Math.random() - 0.5;
-        line.setY(i, ySin * amp + yNoise * noise);
-    }
-    // line.setX(i, xx);
+    
+    const yNoise = Math.random() - 0.5;
+    lines.polarization.setY(i, ySin * amp + yNoise * noise);
   }
-  for (let i =0; i<line2.numPoints; i++){
-    // const angle=(cam_phi+phase)%(Math.PI*4)+(Math.PI/2);
-    // const angle=(phase)%(Math.PI*4)+(Math.PI/2);
-    const angle=(cam_phi + phase)%(Math.PI*4);
-    const x = angle/(Math.PI*4)*2-1;  // Scale to match 4π range
-    //const x = angle/(2*Math.PI)-1;
-    line2.setX(i, x);
-    line2.setY(i, -1 + i * 2 / numX);
-  }
-  for (let i = 0; i<line3.numPoints; i++){
-     // Fixed parameters for cone intensity calculation
-    const x = -1 + i * 2 / numX;
-    const phi = 2.0 * Math.PI * (x + 1);
-    const k = 0.3;                                    // 
-    const theta = conf.obs_angle * Math.PI / 180;  // observation angle
-    const beta2 = Math.PI / 6;                 // cone opening angle
-    const dipole = conf.dipole_angle * Math.PI / 180; // dipole angle
-    const I0 = 1;                                   // peak intensity
-    const intensity = coneGaussianIntensity(k, theta, beta2, dipole, phi, I0);
-    line3.setY(i, intensity *2);
-   
+  
+  // Update phase marker line (line 2)
+  for (let i = 0; i < lines.phase.numPoints; i++) {
+    lines.phase.setX(i, x);
+    lines.phase.setY(i, -1 + i * 2 / numX);
   }
 }
 
-//------------------------------------------------------------------------------------------------------------------------
+/**
+ * Main animation loop
+ */
+function animate() {
+  // Update controls
+  controls.update();
+  
+  // Update plot data
+  updatePlotData();
+  plotting.wglp.update();
+  
+  // Render 3D scene
+  renderer.render(scene, camera);
+  
+  // Continue animation
+  requestAnimationFrame(animate);
+}
+
+/**
+ * Animation frame for WebGL plotting
+ */
+function plotAnimationFrame() {
+  updatePlotData();
+  plotting.wglp.update();
+  requestAnimationFrame(plotAnimationFrame);
+}
+
+// ===================================================================
+// GUI SETUP
+// ===================================================================
+
+/**
+ * Sets up the dat.GUI interface
+ */
+function setupGUI() {
+  const gui = new GUI();
+  
+  // Physical parameters folder
+  const physicsFolder = gui.addFolder('Physics Parameters');
+  physicsFolder.add(config, 'dipole_angle', 0, 90).name('Dipole Angle (°)').onChange(updateQuaternions);
+  physicsFolder.add(config, 'obs_angle', 0, 180).name('Observer Angle (°)');
+  physicsFolder.add(config, 'pl_radius', 1, 20).name('Polarization Radius');
+  physicsFolder.add(config, 'emission_h', 0, 1).name('Emission Height');
+  physicsFolder.add(config, 'translation_d', 0, 1).name('Beam Offset');
+  physicsFolder.add(config, 'translation_delta', 0, 1).name('Beam Aperture');
+  
+  // Animation folder
+  const animationFolder = gui.addFolder('Animation');
+  animationFolder.add(config, 'rotation_speed', 0, 0.1).name('Rotation Speed');
+  animationFolder.add(config, 'rotating').name('Enable Rotation');
+  
+  // Display modes folder
+  const displayFolder = gui.addFolder('Display Modes');
+  displayFolder.add(config, 'x_mode').name('X-mode Polarization');
+  displayFolder.add(config, 'o_mode').name('O-mode Polarization');
+  displayFolder.add(config, 'lock_observer').name('Lock Observer');
+  
+  // Open important folders by default
+  physicsFolder.open();
+  displayFolder.open();
+  
+  return gui;
+}
+
+// ===================================================================
+// INITIALIZATION
+// ===================================================================
+
+/**
+ * Initialize the entire application
+ */
+function initialize() {
+  console.log('Initializing RVM Visualization...');
+  
+  // Setup scene components
+  setupLighting();
+  createNeutronStar();
+  createPolarizationSphere();
+  createRotationAxis();
+  createMagneticBeams();
+  
+  // Initialize physics
+  updateQuaternions();
+  
+  // Setup GUI
+  setupGUI();
+  
+  // Start animations
+  animate();
+  plotAnimationFrame();
+  
+  console.log('RVM Visualization initialized successfully!');
+}
+
+// Start the application when the page loads
+window.addEventListener('load', initialize);
+
+// ===================================================================
+// EMBEDDED WEBGL PLOTTING LIBRARY
+// ===================================================================
 
 (function (global, factory) {
   typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
@@ -1659,31 +1510,3 @@ function update() {
   exports.WebglThickLine = WebglThickLine;
 
 }));
-
-//-----------------------------------------------------------------------------------------------
-
-const canvas3 = document.getElementById("chart");
-
-const xyValues = [
-    {x:0, y:-1},
-    {x:0, y:1}
-  ];
-
-
-  const color1 = new WebglPlotBundle.ColorRGBA(0,0.1,0.1,0.5);
-
-new Chart("chart", {
-    type: "scatter",
-    data: {},
-      options: {
-        scales: {
-          xAxes: [{ticks: {min: 0, max:1},display:false}],
-          yAxes: [{ticks: {min: -1, max:1}, display:true,gridLines: {
-            display: true         
-          }}],
-        },
-        responsive: false,
-        //maintainAspectRatio: true
-    }
-        
-  });
