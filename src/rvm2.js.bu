@@ -505,16 +505,16 @@ const thickness = 0.01;
 // const line = new WebglPlotBundle.WebglLine(color, numX);
 const line = new WebglPlotBundle.WebglThickLine(white, numX, thickness);
 const line2 = new WebglPlotBundle.WebglThickLine(red, numY, thickness);
-const line3 = new WebglPlotBundle.WebglThickLine(green, numX, thickness);
+// const line3 = new WebglPlotBundle.WebglThickLine(green, numX, thickness);
 
 const wglp = new WebglPlotBundle.WebglPlot(canvas2);
 
 line.lineSpaceX(-1, 2 / numX);
 line2.lineSpaceX(-1, 2 / numY);
-line3.lineSpaceX(-1, 2 / numX);
+// line3.lineSpaceX(-1, 2 / numX);
 wglp.addThickLine(line);
 wglp.addThickLine(line2);
-wglp.addThickLine(line3);
+// wglp.addThickLine(line3);
 
 function newFrame() {
   update();
@@ -522,28 +522,6 @@ function newFrame() {
   requestAnimationFrame(newFrame);
 }
 requestAnimationFrame(newFrame);
-
-function coneGaussianIntensity(k, theta_obs, theta_cone, dipole, phi, I0) {
-  const ax = Math.sin(dipole) * Math.cos(phi);
-  const ay = Math.sin(dipole) * Math.sin(phi);
-  const az = Math.cos(dipole);
-
-  const r = 1.0;
-  const rx = r * Math.sin(theta_obs);
-  const ry = 0; // Point on xz plane
-  const rz = r * Math.cos(theta_obs);
-
-  const zp = (rx * ax + rz * az); 
-  const r_perp_sq = (rx * rx + rz * rz) - zp * zp;
-
-  const sigma = Math.abs(Math.pow(k * zp * Math.tan(theta_cone + 1e-8), 2));
-
-  const intensity = I0 * Math.exp(-r_perp_sq / (2 * sigma));
-
-  return intensity;
-}
-
-
 
 function update() {
   const freq = 0.002;
@@ -599,23 +577,14 @@ function update() {
     // const angle=(phase)%(Math.PI*4)+(Math.PI/2);
     const angle=(cam_phi + phase)%(Math.PI*4);
     const x = angle/(Math.PI*4)*2-1;  // Scale to match 4π range
-    //const x = angle/(2*Math.PI)-1;
+    // const x = angle/(2*Math.PI)-1;
     line2.setX(i, x);
     line2.setY(i, -1 + i * 2 / numX);
   }
-  for (let i = 0; i<line3.numPoints; i++){
-     // Fixed parameters for cone intensity calculation
-    const x = -1 + i * 2 / numX;
-    const phi = 2.0 * Math.PI * (x + 1);
-    const k = 0.3;                                    // 
-    const theta = conf.obs_angle * Math.PI / 180;  // observation angle
-    const beta2 = Math.PI / 6;                 // cone opening angle
-    const dipole = conf.dipole_angle * Math.PI / 180; // dipole angle
-    const I0 = 1;                                   // peak intensity
-    const intensity = coneGaussianIntensity(k, theta, beta2, dipole, phi, I0);
-    line3.setY(i, intensity *2);
-   
-  }
+//   for (let i = 0; i<line3.numPoints; i++){
+//     line3.setX();
+//     line3.setY();
+//   }
 }
 
 //------------------------------------------------------------------------------------------------------------------------
