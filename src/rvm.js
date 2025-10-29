@@ -132,7 +132,7 @@ scene.add(z_line);
 // }
 
 const loader = new THREE.TextureLoader();
-const texture = loader.load ('plasma2.jpg')
+const texture = loader.load ('plasma.jpg')
 
 function set_axis(){
     var axis_geometry2 = new THREE.ConeGeometry(5, 100, 64, 32, true);  // Increased segments, capped
@@ -252,8 +252,8 @@ function create_fieldlines(th_obs, r_pl, n_lines, n_segments, d, delta) {
 
     //field line material
     var line_matLine = new LineMaterial({
-        color: 0x7b2cbf,
-        // color: 0x3d34bb,
+        color : 0x024A0D,
+        // color: 0x7b2cbf,
         // color: 0x3d34bb,
         vertexColors: false,
         worldUnits: true,
@@ -307,7 +307,7 @@ function create_polarization_vectors() {
     const shaftRadius = 0.05;
     const headRadius = 0.1;
 
-    const arrowMaterial = new THREE.MeshPhongMaterial({ color: 0xf35b04 });
+    const arrowMaterial = new THREE.MeshPhongMaterial({ color: 0xBF3A0A }); //0xf35b04
 
     // Shaft (cylinder) — align it so its base sits at origin and it points +Y
     const shaftGeom = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLength, 8);
@@ -370,7 +370,8 @@ obs_circ_geometry.setPositions( obs_circ_pos );
 // obs line material
 var obs_circ_matLine = new LineMaterial( {
 //   color: 0xff7900,
-  color: 0xf7b801,
+  // color: 0xf7b801,
+  color: 0x846204,
   worldUnits: true,
   linewidth: 0.10, // in world units with size attenuation, pixels otherwise
   vertexColors: false,
@@ -486,13 +487,12 @@ animate();
 
 //------------------------------------------------------------------------------------------------------------------------
 
-const canvas2 = document.getElementById("plot");
+const canvas2 = document.getElementById("plot1");
+const canvas3 = document.getElementById("plot2"); // second canvas for intensity
 
 const devicePixelRatio = window.devicePixelRatio || 1;
-canvas2.width = canvas2.clientWidth * devicePixelRatio;
-canvas2.height = canvas2.clientHeight * devicePixelRatio * 1.4;
 
-const numX = canvas2.width;
+const numX = canvas2.width * 4;
 const numY = canvas2.height;
 
 const color = new WebglPlotBundle.ColorRGBA(Math.random(), Math.random(), Math.random(), 1);
@@ -500,30 +500,52 @@ const color = new WebglPlotBundle.ColorRGBA(Math.random(), Math.random(), Math.r
 const red = new WebglPlotBundle.ColorRGBA(243/255, 91/255, 4/255, 1);
 const white = new WebglPlotBundle.ColorRGBA(1,1,1,1);
 const green = new WebglPlotBundle.ColorRGBA(0, 1, 0, 1);
+const blue = new WebglPlotBundle.ColorRGBA(26/255, 90/255, 217/255, 1);
+// const blue = new WebglPlotBundle.ColorRGBA(7/255, 53/255, 220/255, 1);
+const yellow = new WebglPlotBundle.ColorRGBA(1, 1, 0, 1);  // Yellow color for high intensity regions
 
 const thickness = 0.01;
 // const line = new WebglPlotBundle.WebglLine(color, numX);
-const line = new WebglPlotBundle.WebglThickLine(white, numX, thickness);
-const line2 = new WebglPlotBundle.WebglThickLine(red, numY, thickness);
-const line3 = new WebglPlotBundle.WebglThickLine(green, numX, thickness);
+const line1_obs = new WebglPlotBundle.WebglThickLine(green, numX, thickness);  // PA where intensity > threshold (observed)
+const line1_bkg = new WebglPlotBundle.WebglThickLine(white, numX, thickness);    // PA where intensity <= threshold (background)
+const line2 = new WebglPlotBundle.WebglThickLine(red, numY, thickness);      // Vertical line for wglp (PA plot)
+const line3 = new WebglPlotBundle.WebglThickLine(blue, numX, thickness);
+const line4 = new WebglPlotBundle.WebglThickLine(red, numY, thickness);      // Vertical line for wglp2 (intensity plot)
 
-const wglp = new WebglPlotBundle.WebglPlot(canvas2);
+// Create WebGL plot instances
+const wglp = new WebglPlotBundle.WebglPlot(canvas2);  // PA plot (line + line2)
+const wglp2 = new WebglPlotBundle.WebglPlot(canvas3);  // PA plot (line + line2)
 
-line.lineSpaceX(-1, 2 / numX);
+
+line1_obs.lineSpaceX(-1, 2 / numX);
+line1_bkg.lineSpaceX(-1, 2 / numX);
 line2.lineSpaceX(-1, 2 / numY);
 line3.lineSpaceX(-1, 2 / numX);
-wglp.addThickLine(line);
+line4.lineSpaceX(-1, 2 / numY);  // Same setup as line2
+
+// Adjust wglp2 to show intensity range [0, 2] instead of [-1, 1]
+// wglp2.gScaleY = 0.5;   // Scale down so range 0-2 fits in viewport
+wglp2.gOffsetY = -0.5; // Shift down so 0 is at bottom, 2 is at top
+
+// Add PA lines to first plot (both observed and background versions)
+wglp.addThickLine(line1_obs);
+wglp.addThickLine(line1_bkg);
 wglp.addThickLine(line2);
-wglp.addThickLine(line3);
+
+// Add intensity line to appropriate plot
+wglp2.addThickLine(line3);
+wglp2.addThickLine(line4); 
 
 function newFrame() {
   update();
-  wglp.update();
+  wglp.update();   // Update PA plot
+  wglp2.update();  // Update intensity
   requestAnimationFrame(newFrame);
 }
 requestAnimationFrame(newFrame);
 
-function coneGaussianIntensity(k, theta_obs, theta_cone, dipole, phi, I0) {
+
+function coneGaussianIntensity(theta_obs, thetaCone, dipole, phi, I0) {
   const ax = Math.sin(dipole) * Math.cos(phi);
   const ay = Math.sin(dipole) * Math.sin(phi);
   const az = Math.cos(dipole);
@@ -534,13 +556,42 @@ function coneGaussianIntensity(k, theta_obs, theta_cone, dipole, phi, I0) {
   const rz = r * Math.cos(theta_obs);
 
   const zp = (rx * ax + rz * az); 
-  const r_perp_sq = (rx * rx + rz * rz) - zp * zp;
+  const r_perp_sq = Math.abs((rx * rx + rz * rz) - zp * zp);
 
-  const sigma = Math.abs(Math.pow(k * zp * Math.tan(theta_cone + 1e-8), 2));
+//   const sigma = Math.abs(Math.pow(k * zp * Math.tan(theta_cone + 1e-8), 2));
+  const sigma = 0.2 * 2 * Math.pow(Math.tan(thetaCone + 1e-8), 2);
 
-  const intensity = I0 * Math.exp(-r_perp_sq / (2 * sigma));
+  const intensity = I0 * Math.exp(-r_perp_sq / sigma);
 
   return intensity;
+}
+
+function calculatePolarizationAngle(phi, dipole_angle, obs_angle, emission_h, translation_d, translation_delta, o_mode) {
+  const rad_dipole = dipole_angle * Math.PI / 180;  // alpha
+  const rad_obs = obs_angle * Math.PI / 180;
+  
+  const eta = emission_h;
+  const eps = translation_d;
+  const xi = rad_obs;
+  const delta = translation_delta * Math.PI / 180;
+  const beta = 90 / 180 * Math.PI;
+
+  const eq11a = (1 + eta - eps * Math.cos(delta) * Math.cos(xi)) * Math.sin(rad_dipole) * Math.sin(beta + phi)
+                + eps * Math.sin(delta) * (Math.cos(rad_dipole) * Math.cos(xi) * Math.sin(phi) - Math.sin(rad_dipole) * Math.sin(beta) * Math.sin(xi));
+  const eq11b = (1 + eta) * (Math.cos(rad_dipole) * Math.sin(xi) - Math.sin(rad_dipole) * Math.cos(xi) * Math.cos(beta + phi))
+                + eps * (Math.sin(rad_dipole) * Math.cos(delta) * Math.cos(beta + phi) - Math.cos(rad_dipole) * Math.sin(delta) * Math.cos(phi));
+
+  if (o_mode) {
+    // O-mode (ordinary) polarization
+    return Math.atan(eq11a / eq11b);
+  } else {
+    // X-mode (extraordinary) polarization
+    let ySin = Math.atan(eq11a / eq11b) + Math.PI / 2;
+    if (ySin > Math.PI / 2) {
+      ySin = ySin - Math.PI;
+    }
+    return ySin;
+  }
 }
 
 
@@ -548,52 +599,53 @@ function coneGaussianIntensity(k, theta_obs, theta_cone, dipole, phi, I0) {
 function update() {
   const freq = 0.002;
   const amp = 0.4; // (1/pi)*0.8
-  const noise = 0.00;
+  const noise = 0.01;
   const cam_phi = Math.atan2(camera.position.y, camera.position.x) + Math.PI;
-
-  for (let i = 0; i < line.numPoints; i++) {
-    const rad_dipole = conf.dipole_angle/180*Math.PI; // alpha
-    const rad_obs = conf.obs_angle/180*Math.PI;
+  
+  // Threshold for intensity masking (same as in Python)
+  const I0 = 1;
+  const threshold = 0.01 * I0;
+  
+  // First, calculate intensity for all points and PA values
+  const intensityArray = new Array(numX);
+  const paArray = new Array(numX);
+  
+  for (let i = 0; i < numX; i++) {
     const x = -1 + i * 2 / numX;
     const phi = 2.0 * Math.PI * (x + 1);
-
-    const eta = conf.emission_h;
-    const eps = conf.translation_d;
-    const xi = rad_obs;
-    const delta = conf.translation_delta * Math.PI/180;
-    const beta = 90/180 * Math.PI;
-
-    const eq11a = (1 + eta - eps * Math.cos(delta) * Math.cos(xi)) * Math.sin(rad_dipole) * Math.sin(beta + phi)
-                  + eps * Math.sin(delta) * (Math.cos(rad_dipole) * Math.cos(xi) * Math.sin(phi) - Math.sin(rad_dipole) * Math.sin(beta) * Math.sin(xi));
-    const eq11b = (1 + eta) * (Math.cos(rad_dipole) * Math.sin(xi) - Math.sin(rad_dipole) * Math.cos(xi) * Math.cos(beta +phi))
-                      + eps * (Math.sin(rad_dipole) * Math.cos(delta) * Math.cos(beta + phi) - Math.cos(rad_dipole) * Math.sin(delta) * Math.cos(phi)); 
-
-    if (conf.o_mode){
-
-        // const ySin = Math.atan((Math.sin(rad_dipole) * Math.sin(phi))/
-        //                        (Math.cos(rad_obs) * Math.sin(rad_dipole)*Math.cos(phi)-Math.sin(rad_obs)*Math.cos(rad_dipole)));
-       
-        const ySin = Math.atan((eq11a)/(eq11b));
-
-        // const ySin = Math.sin(Math.PI * i * freq * Math.PI * 2)-conf.dipole_angle/180;
-        const yNoise = Math.random() - 0.5;
-        line.setY(i, ySin * amp + yNoise * noise);
-    }
-    else{
- 
-        var ySin = Math.atan((eq11a)/(eq11b)) + Math.PI/2;
-
-        //var ySin = (Math.atan((Math.sin(rad_dipole) * Math.sin(phi))/
-        //                       (Math.cos(rad_obs) * Math.sin(rad_dipole)*Math.cos(phi)-Math.sin(rad_obs)*Math.cos(rad_dipole))))+Math.PI/2;
-        if (ySin>Math.PI/2){
-            ySin = ySin-(Math.PI);
-        }
-        // const ySin = Math.sin(Math.PI * i * freq * Math.PI * 2)-conf.dipole_angle/180;
-        const yNoise = Math.random() - 0.5;
-        line.setY(i, ySin * amp + yNoise * noise);
-    }
-    // line.setX(i, xx);
+    
+    // Calculate PA
+    const ySin = calculatePolarizationAngle(
+      phi, 
+      conf.dipole_angle, 
+      conf.obs_angle, 
+      conf.emission_h, 
+      conf.translation_d, 
+      conf.translation_delta, 
+      conf.o_mode
+    );
+    paArray[i] = ySin * amp + (Math.random() - 0.5) * noise;
+    
+    // Calculate intensity
+    const theta = conf.obs_angle * Math.PI / 180;
+    const thetaCone = Math.PI / 18;
+    const dipole = conf.dipole_angle * Math.PI / 180;
+    intensityArray[i] = coneGaussianIntensity(theta, thetaCone, dipole, phi, I0);
   }
+  
+  // Now set the observed and background lines based on intensity threshold
+  for (let i = 0; i < numX; i++) {
+    if (intensityArray[i] > threshold) {
+      // High intensity: show observed (yellow), hide background
+      line1_obs.setY(i, paArray[i]);
+      line1_bkg.setY(i, NaN);
+    } else {
+      // Low intensity: show background (white), hide observed
+      line1_obs.setY(i, NaN);
+      line1_bkg.setY(i, paArray[i]);
+    }
+  }
+
   for (let i =0; i<line2.numPoints; i++){
     // const angle=(cam_phi+phase)%(Math.PI*4)+(Math.PI/2);
     // const angle=(phase)%(Math.PI*4)+(Math.PI/2);
@@ -601,21 +653,28 @@ function update() {
     const x = angle/(Math.PI*4)*2-1;  // Scale to match 4π range
     //const x = angle/(2*Math.PI)-1;
     line2.setX(i, x);
-    line2.setY(i, -1 + i * 2 / numX);
+    line2.setY(i, -1 + i * 2 / numY);
   }
+
   for (let i = 0; i<line3.numPoints; i++){
      // Fixed parameters for cone intensity calculation
     const x = -1 + i * 2 / numX;
     const phi = 2.0 * Math.PI * (x + 1);
-    const k = 0.3;                                    // 
     const theta = conf.obs_angle * Math.PI / 180;  // observation angle
-    const beta2 = Math.PI / 6;                 // cone opening angle
+    const thetaCone = Math.PI / 18;                 // cone opening angle
     const dipole = conf.dipole_angle * Math.PI / 180; // dipole angle
-    const I0 = 1;                                   // peak intensity
-    const intensity = coneGaussianIntensity(k, theta, beta2, dipole, phi, I0);
-    line3.setY(i, intensity *2);
-   
+    const intensity = coneGaussianIntensity(theta, thetaCone, dipole, phi, I0);
+    line3.setY(i, intensity + (Math.random() - 0.5) * noise);
   }
+
+  // Update line4 (vertical line for wglp2) - same as line2
+  for (let i =0; i<line4.numPoints; i++){
+    const angle=(cam_phi + phase)%(Math.PI*4);
+    const x = angle/(Math.PI*4)*2-1;
+    line4.setX(i, x);
+    line4.setY(i, -1 + i * 2 / numY + 0.5);
+  }
+
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -1662,7 +1721,7 @@ function update() {
 
 //-----------------------------------------------------------------------------------------------
 
-const canvas3 = document.getElementById("chart");
+// const canvas3 = document.getElementById("chart");
 
 const xyValues = [
     {x:0, y:-1},

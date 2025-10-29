@@ -15,12 +15,36 @@ body {
   position: absolute;
   left: 70vw;
   top: 50vh;
-  width: 25vw;
-  height: 30vh;
+  width: 35vw;
+  height: 15vh;
   margin: 0px;
   background-color: rgb(0, 0, 0);
   color: white;
-  border-radius: 25px;
+  border-radius: 5px;
+  border: 1px solid rgb(255, 255, 255);
+}
+#plot1 {
+  position: absolute;
+  left: 67vw;
+  top: 55vh; 
+  width: 30vw;
+  height: 15vh;
+  margin: 0px;
+  background-color: rgb(0, 0, 0);
+  color: white;
+  border-radius: 5px;
+  border: 1px solid rgb(255, 255, 255);
+}
+#plot2 {
+  position: absolute;
+  left: 67vw;
+  top: 70vh; /* Adjust this value to place it below the first plot */
+  width: 30vw;
+  height: 15vh;
+  margin: 0px;
+  background-color: rgb(0, 0, 0);
+  color: white;
+  border-radius: 5px;
   border: 1px solid rgb(255, 255, 255);
 }
 #chart {
@@ -55,10 +79,23 @@ body {
   color: #ffffff;
   font-size: 2vw;
 }
+
 #plotDescription {
   position: absolute;
-  left: 72vw;
-  top: 50vh;
+  left: 81vw;
+  top: 54vh;
+  width: 20vw;
+  height: 5vh;
+  /* padding: 2em; */
+  /* border-radius: 25px; */
+  z-index: 1;
+  color: #ffffff;
+  /* background-color: rgba(30, 30, 30, 0.5); */
+}
+#plotDescription2 {
+  position: absolute;
+  left: 81vw;
+  top: 69vh;
   width: 20vw;
   height: 5vh;
   /* padding: 2em; */
