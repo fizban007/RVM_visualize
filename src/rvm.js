@@ -21,12 +21,13 @@ import { LineGeometry } from '../node_modules/three/examples/jsm/lines/LineGeome
 // Physical and visualization parameters
 const Config = function () {
   // Physical parameters
-  this.dipole_angle = 30.0;        // Angle between magnetic and rotation axes (degrees)
-  this.obs_angle = 90.0;           // Observer's viewing angle from rotation axis (degrees)
+  this.dipole_angle = 84.0;        // Angle between magnetic and rotation axes (degrees)
+  this.dipole_phase = 0.01;         // Dipole angle phase (degrees)
+  this.obs_angle = 88.0;           // Observer's viewing angle from rotation axis (degrees)
   this.pl_radius = 10.0;           // Radius of polarization limiting sphere
-  this.emission_h = 0.01;          // Height of radio emission region
-  this.translation_d = 0.41;       // Offset distance of emission beam
-  this.translation_delta = 0.11;   // Angular aperture of emission beam (degrees)
+  // this.emission_h = 0.01;          // Height of radio emission region
+  this.translation_d = 0.01;       // Offset distance of emission beam
+  this.translation_delta = 1;   // Angular aperture of emission beam (degrees)
   
   // Animation parameters
   this.rotation_speed = 0.01;      // Speed of pulsar rotation
@@ -44,9 +45,18 @@ const conf = new Config();
 const q_dipole = new THREE.Quaternion();
 const q_dipole_inv = new THREE.Quaternion();
 
-// Update quaternions based on current dipole angle
+// Update quaternions based on current dipole angle (α) and phase (β)
 function updateQuaternion() {
-  q_dipole.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * conf.dipole_angle / 180.0);
+  // First rotate by alpha (obliquity) around x-axis
+  const q_alpha = new THREE.Quaternion();
+  q_alpha.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * conf.dipole_angle / 180.0);
+  
+  // Then rotate by beta (dipole phase) around z-axis (spin axis)
+  const q_beta = new THREE.Quaternion();
+  q_beta.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI * conf.dipole_phase / 180.0);
+
+  // Combine rotations: q_dipole = q_alpha * q_beta (order matters!)
+  q_dipole.multiplyQuaternions(q_alpha, q_beta);
   q_dipole_inv.copy(q_dipole).invert();
 }
 
@@ -96,14 +106,14 @@ const ambientLight = new THREE.AmbientLight(0x404040);
 scene.add(ambientLight);
 
 // ============================================================================
-// 3D OBJECTS - Neutron Star and Field Visualization
+// 3D OBJECTS - Pulsar and Field Visualization
 // ============================================================================
 
-// Neutron star sphere
-const star_geometry = new THREE.SphereGeometry(1.0, 64, 64);
-const star_material = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
-const star_mesh = new THREE.Mesh(star_geometry, star_material);
-scene.add(star_mesh);
+// Pulsar sphere
+const pulsar_geometry = new THREE.SphereGeometry(1.0, 64, 64);
+const pulsar_material = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
+const pulsar_mesh = new THREE.Mesh(pulsar_geometry, pulsar_material);
+scene.add(pulsar_mesh);
 
 // Polarization limiting sphere (translucent)
 const pl_geometry = new THREE.SphereGeometry(1.0, 64, 64);
@@ -165,6 +175,7 @@ function createEmissionCone() {
   const cone_geometry_upper = new THREE.ConeGeometry(5, 100, 64, 32, true);
   const cone_upper = new THREE.Mesh(cone_geometry_upper, cone_material);
   cone_upper.name = "line";
+  cone_upper.rotateZ(-conf.dipole_phase * Math.PI / 180);
   cone_upper.rotateX(-(conf.dipole_angle / 180 * Math.PI + Math.PI / 2));
   cone_upper.position.set(px, py, pz);
   cone_geometry_upper.translate(0, -50, 0);
@@ -174,6 +185,7 @@ function createEmissionCone() {
   const cone_geometry_lower = new THREE.ConeGeometry(5, 100, 50);
   const cone_lower = new THREE.Mesh(cone_geometry_lower, cone_material);
   cone_lower.name = "line";
+  cone_lower.rotateZ(-conf.dipole_phase * Math.PI / 180);
   cone_lower.rotateX(-(conf.dipole_angle / 180 * Math.PI - Math.PI / 2));
   cone_lower.position.set(px, py, pz);
   cone_geometry_lower.translate(0, -50, 0);
@@ -209,8 +221,8 @@ const obs_circle_material = new LineMaterial({
 const obs_circle = new Line2(obs_circle_geometry, obs_circle_material);
 obs_circle.computeLineDistances();
 scene.add(obs_circle);
-obs_circle.scale.setScalar((conf.pl_radius + conf.emission_h) * Math.sin(conf.obs_angle * Math.PI / 180));
-obs_circle.position.setZ((conf.pl_radius + conf.emission_h) * Math.cos(conf.obs_angle * Math.PI / 180));
+obs_circle.scale.setScalar(conf.pl_radius * Math.sin(conf.obs_angle * Math.PI / 180));
+obs_circle.position.setZ(conf.pl_radius * Math.cos(conf.obs_angle * Math.PI / 180));
 
 // ============================================================================
 // MAGNETIC FIELD LINES
@@ -314,11 +326,12 @@ function createFieldLines(theta_obs, radius_pl, num_lines, num_segments, offset_
 
 // Create 3D polarization arrows at intersection points
 function createPolarizationVectors() {
-  const dipole_moment = new THREE.Vector3(
-    0,
-    Math.sin(conf.dipole_angle * Math.PI / 180),
-    Math.cos(conf.dipole_angle * Math.PI / 180)
-  );
+  // Dipole moment direction in dipole frame (aligned with z' axis)
+  const dipole_moment_dipole_frame = new THREE.Vector3(0, 0, 1);
+  
+  // Transform dipole moment to lab frame using both alpha and beta rotations
+  const dipole_moment = dipole_moment_dipole_frame.clone().applyQuaternion(q_dipole_inv);
+  
   const radius_cubed = Math.pow(conf.pl_radius * 10, 3);
   const radius_fifth = Math.pow(conf.pl_radius * 10, 5);
 
@@ -380,8 +393,8 @@ function createPolarizationVectors() {
 // Update polarization limiting sphere and field lines
 function updatePolarizationSphere() {
   pl_mesh.scale.setScalar(conf.pl_radius);
-  obs_circle.scale.setScalar((conf.pl_radius + conf.emission_h) * Math.sin(conf.obs_angle * Math.PI / 180));
-  obs_circle.position.setZ((conf.pl_radius + conf.emission_h) * Math.cos(conf.obs_angle * Math.PI / 180));
+  obs_circle.scale.setScalar(conf.pl_radius * Math.sin(conf.obs_angle * Math.PI / 180));
+  obs_circle.position.setZ(conf.pl_radius * Math.cos(conf.obs_angle * Math.PI / 180));
   controls.minPolarAngle = controls.maxPolarAngle = conf.obs_angle * Math.PI / 180;
   updateFieldLines();
 }
@@ -393,7 +406,7 @@ function updateFieldLines() {
   clearGroup(polarization_vectors);
   createFieldLines(
     conf.obs_angle * Math.PI / 180,
-    conf.pl_radius + conf.emission_h,
+    conf.pl_radius,
     40,
     100,
     conf.translation_d,
@@ -429,17 +442,44 @@ function toggleLockObserver() {
 // ============================================================================
 
 const gui = new GUI();
-gui.add(conf, "obs_angle", 0.0, 90.0).listen().onChange(updatePolarizationSphere);
-gui.add(conf, "pl_radius", 1.0, 10.0).listen().onChange(updatePolarizationSphere);
-gui.add(conf, "dipole_angle", 0.0, 90.0).listen().onChange(updatePolarizationSphere);
-gui.add(conf, "emission_h", 0.0, 1.0).listen().onChange(updatePolarizationSphere);
-gui.add(conf, "translation_d", 0.0, 1.0).listen().onChange(updatePolarizationSphere);
-gui.add(conf, "translation_delta", 0.0, 180.0).listen().onChange(updatePolarizationSphere);
-gui.add(conf, "rotation_speed", 0.0, 1).listen();
-gui.add(conf, "o_mode").listen().onChange(switchToOMode);
-gui.add(conf, "x_mode").listen().onChange(switchToXMode);
-gui.add(conf, "rotating").listen();
-gui.add(conf, "lock_observer").listen().onChange(toggleLockObserver);
+
+// Customize GUI size with responsive units
+gui.domElement.style.width = '20vw';  // 20% of viewport width
+gui.domElement.style.minWidth = '280px';  // Minimum width to prevent too small
+gui.domElement.style.maxWidth = '400px';  // Maximum width to prevent too large
+gui.domElement.style.fontSize = '1em';  // Relative font size
+
+// Position GUI in upper right corner with no gaps
+gui.domElement.style.position = 'absolute';
+gui.domElement.style.top = '0px';
+gui.domElement.style.right = '0px';
+gui.domElement.style.margin = '0px';
+gui.domElement.style.padding = '0px';
+
+// Observer & Geometry
+gui.add(conf, "obs_angle", 0.0, 90.0).name("Line of Sight ζ (°)").listen().onChange(updatePolarizationSphere);
+
+// Magnetic Dipole Configuration
+gui.add(conf, "dipole_angle", 0.0, 90.0).name("Obliquity α (°)").listen().onChange(updatePolarizationSphere);
+gui.add(conf, "dipole_phase", 0.0, 360.0).name("Dipole Phase β (°)").listen().onChange(updatePolarizationSphere);
+
+// Off-Centering Parameters
+gui.add(conf, "translation_d", 0.0, 1.0).name("Offset Distance ε").listen().onChange(updatePolarizationSphere);
+gui.add(conf, "translation_delta", 0.0, 180.0).name("Offset Colatitude δ (°)").listen().onChange(updatePolarizationSphere);
+
+// Emission Properties
+// gui.add(conf, "emission_h", 0.0, 1.0).name("Emission Height η").listen().onChange(updatePolarizationSphere);
+gui.add(conf, "pl_radius", 1.0, 10.0).name("Emission Radius").listen().onChange(updatePolarizationSphere);
+
+// Polarization Modes
+gui.add(conf, "o_mode").name("O-Mode").listen().onChange(switchToOMode);
+gui.add(conf, "x_mode").name("X-Mode").listen().onChange(switchToXMode);
+
+// Animation Controls
+gui.add(conf, "rotation_speed", 0.0, 1).name("Rotation Speed");
+gui.add(conf, "rotating").name("Auto Rotate");
+gui.add(conf, "lock_observer").name("Lock to Observer").listen().onChange(toggleLockObserver);
+
 
 // Camera position setter
 const guiFunctions = {
@@ -479,7 +519,7 @@ function animate3DScene() {
 // Initialize field lines and start animation
 createFieldLines(
   conf.obs_angle * Math.PI / 180,
-  conf.pl_radius + conf.emission_h,
+  conf.pl_radius,
   40,
   100,
   conf.translation_d,
@@ -564,16 +604,18 @@ intensity_plot.addThickLine(phase_marker_intensity);
  * Calculate Gaussian cone intensity profile
  * @param {number} theta_obs - Observer angle (radians)
  * @param {number} theta_cone - Cone opening angle (radians)
- * @param {number} dipole - Dipole angle (radians)
+ * @param {number} dipole_angle - Dipole angle (radians)
+ * @param {number} dipole_phase - Dipole phase (radians)
  * @param {number} phi - Rotation phase (radians)
  * @param {number} I0 - Peak intensity
  * @returns {number} Intensity at given position
  */
-function calculateConeIntensity(theta_obs, theta_cone, dipole, phi, I0) {
+function calculateConeIntensity(theta_obs, theta_cone, dipole_angle, dipole_phase, phi, I0) {
+  phi += dipole_phase;
   // Cone axis direction
-  const ax = Math.sin(dipole) * Math.cos(phi);
-  const ay = Math.sin(dipole) * Math.sin(phi);
-  const az = Math.cos(dipole);
+  const ax = Math.sin(dipole_angle) * Math.cos(phi);
+  const ay = Math.sin(dipole_angle) * Math.sin(phi);
+  const az = Math.cos(dipole_angle);
 
   // Observer position (on xz-plane)
   const r = 1.0;
@@ -593,7 +635,7 @@ function calculateConeIntensity(theta_obs, theta_cone, dipole, phi, I0) {
 }
 
 /**
- * Calculate polarization angle using RVM formula
+ * Calculate polarization angle using DRVM formula
  * @param {number} phi - Rotation phase (radians)
  * @param {number} dipole_angle - Dipole angle (degrees)
  * @param {number} obs_angle - Observer angle (degrees)
@@ -603,18 +645,18 @@ function calculateConeIntensity(theta_obs, theta_cone, dipole, phi, I0) {
  * @param {boolean} o_mode - True for O-mode, false for X-mode
  * @returns {number} Polarization angle (radians)
  */
-function calculatePolarizationAngle(phi, dipole_angle, obs_angle, emission_h, translation_d, translation_delta, o_mode) {
+function calculatePolarizationAngle(phi, dipole_angle, dipole_phase, obs_angle, pl_radius, translation_d, translation_delta, o_mode) {
   // Convert to radians
   const alpha = dipole_angle * Math.PI / 180;
+  const beta = dipole_phase * Math.PI / 180;
   const xi = obs_angle * Math.PI / 180;
   const delta = translation_delta * Math.PI / 180;
-  const beta = 90 / 180 * Math.PI;
   
-  // RVM parameters
-  const eta = emission_h;
+  // DRVM parameters
+  const eta = pl_radius;
   const epsilon = translation_d;
 
-  // RVM equation components (Eq. 11 from RVM paper)
+  // DRVM equation components (Eq. 11 from DRVM paper)
   const numerator = (1 + eta - epsilon * Math.cos(delta) * Math.cos(xi)) * Math.sin(alpha) * Math.sin(beta + phi)
                   + epsilon * Math.sin(delta) * (Math.cos(alpha) * Math.cos(xi) * Math.sin(phi) 
                   - Math.sin(alpha) * Math.sin(beta) * Math.sin(xi));
@@ -664,8 +706,9 @@ function update2DPlots() {
     const pa = calculatePolarizationAngle(
       phi,
       conf.dipole_angle,
+      conf.dipole_phase,
       conf.obs_angle,
-      conf.emission_h,
+      conf.pl_radius,
       conf.translation_d,
       conf.translation_delta,
       conf.o_mode
@@ -675,8 +718,9 @@ function update2DPlots() {
     // Calculate intensity
     const theta = conf.obs_angle * Math.PI / 180;
     const theta_cone = Math.PI / 18;  // Fixed cone angle
-    const dipole = conf.dipole_angle * Math.PI / 180;
-    intensity_array[i] = calculateConeIntensity(theta, theta_cone, dipole, phi, I0);
+    const dipole_angle = conf.dipole_angle * Math.PI / 180;
+    const dipole_phase = conf.dipole_phase * Math.PI / 180;
+    intensity_array[i] = calculateConeIntensity(theta, theta_cone, dipole_angle, dipole_phase, phi, I0);
   }
   
   // Set PA lines based on intensity threshold
