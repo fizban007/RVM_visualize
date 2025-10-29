@@ -15,12 +15,36 @@ body {
   position: absolute;
   left: 70vw;
   top: 50vh;
-  width: 25vw;
-  height: 30vh;
+  width: 35vw;
+  height: 15vh;
   margin: 0px;
   background-color: rgb(0, 0, 0);
   color: white;
-  border-radius: 25px;
+  border-radius: 5px;
+  border: 1px solid rgb(255, 255, 255);
+}
+#plot1 {
+  position: absolute;
+  left: 67vw;
+  top: 55vh; 
+  width: 30vw;
+  height: 15vh;
+  margin: 0px;
+  background-color: rgb(0, 0, 0);
+  color: white;
+  border-radius: 5px;
+  border: 1px solid rgb(255, 255, 255);
+}
+#plot2 {
+  position: absolute;
+  left: 67vw;
+  top: 70vh; /* Adjust this value to place it below the first plot */
+  width: 30vw;
+  height: 15vh;
+  margin: 0px;
+  background-color: rgb(0, 0, 0);
+  color: white;
+  border-radius: 5px;
   border: 1px solid rgb(255, 255, 255);
 }
 #chart {
@@ -55,16 +79,125 @@ body {
   color: #ffffff;
   font-size: 2vw;
 }
+
 #plotDescription {
   position: absolute;
-  left: 72vw;
-  top: 50vh;
-  width: 20vw;
+  /* Align with right edge of plot1: left position + width - 10px offset */
+  left: calc(67vw + 30vw - 10px);
+  top: 54vh;
+  width: auto; /* Let content determine width */
+  max-width: 20vw;
   height: 5vh;
   /* padding: 2em; */
   /* border-radius: 25px; */
   z-index: 1;
   color: #ffffff;
   /* background-color: rgba(30, 30, 30, 0.5); */
+  transform: translateX(-100%); /* Move left by its own width to align right edge */
+  text-align: right;
+}
+#plotDescription2 {
+  position: absolute;
+  /* Align with right edge of plot2: left position + width - 10px offset */
+  left: calc(67vw + 30vw - 10px);
+  top: 69vh;
+  width: auto; /* Let content determine width */
+  max-width: 20vw;
+  height: 5vh;
+  /* padding: 2em; */
+  /* border-radius: 25px; */
+  z-index: 1;
+  color: #ffffff;
+  /* background-color: rgba(30, 30, 30, 0.5); */
+  transform: translateX(-100%); /* Move left by its own width to align right edge */
+  text-align: right;
+}
+
+/* ============================================================================
+   dat.GUI Custom Theme - Clean white with high transparency
+   ============================================================================ */
+
+/* Clean white theme with high transparency and white text */
+.dg.ac {
+  z-index: 1000 !important;
+}
+
+.dg.main {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1) !important;
+}
+
+.dg .title {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+}
+
+.dg .c {
+  color: #ffffff !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+}
+
+.dg .property-name {
+  color: #ffffff !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+}
+
+.dg input[type="text"],
+.dg input[type="number"] {
+  background-color: rgba(255, 255, 255, 0.25) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(26, 90, 217, 0.5) !important;
+}
+
+.dg .cr.number input[type="text"] {
+  background-color: rgba(26, 90, 217, 0.2) !important;
+}
+
+.dg .slider {
+  background-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.dg .slider-fg {
+  background-color: rgba(26, 90, 217, 0.6) !important;
+}
+
+.dg li:not(.folder) {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+.dg li.folder {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.25) !important;
+}
+
+.dg .cr.boolean {
+  border-left: 3px solid rgba(26, 90, 217, 0.7) !important;
+}
+
+.dg .cr.function {
+  background-color: rgba(26, 90, 217, 0.2) !important;
+  border: 1px solid rgba(26, 90, 217, 0.4) !important;
+  color: #ffffff !important;
+}
+
+.dg .cr.function:hover {
+  background-color: rgba(26, 90, 217, 0.35) !important;
+}
+
+.dg .close-button {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+  width: 100% !important;
+  text-align: center !important;
+}
+
+.dg .close-button:hover {
+  background-color: rgba(26, 90, 217, 0.3) !important;
+}
+
+.dg.main.taller-than-window .close-button {
+  border-top: 1px solid rgba(255, 255, 255, 0.2) !important;
 }
 
