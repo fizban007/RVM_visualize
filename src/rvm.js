@@ -1,36 +1,33 @@
+// ============================================================================
+// RVM (Rotating Vector Model) Visualization
+// Visualizes pulsar magnetic field lines, polarization vectors, and
+// polarization angle/intensity plots
+// ============================================================================
+
+// ============================================================================
+// IMPORTS
+// ============================================================================
 import * as THREE from '../node_modules/three/build/three.module.js';
-// import Stats from '../vendor/stats.module.js';
 import { GUI } from '../node_modules/dat.gui/build/dat.gui.module.js';
 import { OrbitControls } from '../node_modules/three/examples/jsm/controls/OrbitControls.js';
 import { Line2 } from '../node_modules/three/examples/jsm/lines/Line2.js';
-// import * as MeshLine from '../vender/THREE.MeshLine.js';
 import { LineMaterial } from '../node_modules/three/examples/jsm/lines/LineMaterial.js';
 import { LineGeometry } from '../node_modules/three/examples/jsm/lines/LineGeometry.js';
-// import { alphaT } from 'three/tsl';
 
-const width = window.innerWidth;
-const height = window.innerHeight;
-const aspect = width / height;
-const canvas = document.getElementById("vis");
-var renderer = new THREE.WebGLRenderer({
-  canvas: canvas,
-  alpha: true,
-  antialias: true,
-  preserveDrawingBuffer: true
-});
-renderer.setSize(width, height);
-// const canvas = renderer.domElement;
-// document.body.appendChild(canvas);
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
 
-/// Config contains the physical and visualization parameters
-var Config = function () {
+// Physical and visualization parameters
+const Config = function () {
   // Physical parameters
-  this.dipole_angle = 30.0;        // Angle between magnetic and rotation axes (degrees)
-  this.obs_angle = 90.0;           // Observer's viewing angle from rotation axis (degrees)
+  this.dipole_angle = 84.0;        // Angle between magnetic and rotation axes (degrees)
+  this.dipole_phase = 0.01;         // Dipole angle phase (degrees)
+  this.obs_angle = 88.0;           // Observer's viewing angle from rotation axis (degrees)
   this.pl_radius = 10.0;           // Radius of polarization limiting sphere
-  this.emission_h = 0.01;          // Height of radio emission region
-  this.translation_d = 0.41;       // Offset distance of emission beam
-  this.translation_delta = 0.11;   // Angular aperture of emission beam (radians)
+  // this.emission_h = 0.01;          // Height of radio emission region
+  this.translation_d = 0.01;       // Offset distance of emission beam
+  this.translation_delta = 1;   // Angular aperture of emission beam (degrees)
   
   // Animation parameters
   this.rotation_speed = 0.01;      // Speed of pulsar rotation
@@ -40,379 +37,398 @@ var Config = function () {
   this.o_mode = true;              // Show O-mode (ordinary) polarization
   this.rotating = false;           // Enable/disable rotation animation
   this.lock_observer = true;       // Lock observer viewpoint
+};
+
+const conf = new Config();
+
+// Quaternions for dipole rotation transformations
+const q_dipole = new THREE.Quaternion();
+const q_dipole_inv = new THREE.Quaternion();
+
+// Update quaternions based on current dipole angle (α) and phase (β)
+function updateQuaternion() {
+  // First rotate by alpha (obliquity) around x-axis
+  const q_alpha = new THREE.Quaternion();
+  q_alpha.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * conf.dipole_angle / 180.0);
+  
+  // Then rotate by beta (dipole phase) around z-axis (spin axis)
+  const q_beta = new THREE.Quaternion();
+  q_beta.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI * conf.dipole_phase / 180.0);
+
+  // Combine rotations: q_dipole = q_alpha * q_beta (order matters!)
+  q_dipole.multiplyQuaternions(q_alpha, q_beta);
+  q_dipole_inv.copy(q_dipole).invert();
 }
-var conf = new Config();
-var q_dipole = new THREE.Quaternion();
-var q_dipole_inv = new THREE.Quaternion();
 
-function update_quaternion() {
-  q_dipole.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI * conf.dipole_angle / 180.0);
-  q_dipole_inv.copy(q_dipole);
-  q_dipole_inv.invert();
-}
+updateQuaternion();
 
-update_quaternion();
+// ============================================================================
+// THREE.JS SCENE SETUP
+// ============================================================================
 
-/// Setting up the scene
-var scene = new THREE.Scene();
+// Renderer setup
+const width = window.innerWidth;
+const height = window.innerHeight;
+const canvas = document.getElementById("vis");
+const renderer = new THREE.WebGLRenderer({
+  canvas: canvas,
+  alpha: true,
+  antialias: true,
+  preserveDrawingBuffer: true
+});
+renderer.setSize(width, height);
+
+// Scene setup
+const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
-// THREE.Object3D.DefaultUp.set(0.5,0.0,0.8);
-var camera = new THREE.PerspectiveCamera(30, width / height, 1, 1000);
-var camera_d = 160;
-camera.position.z = camera_d * Math.cos(80 * Math.PI / 180);
-camera.position.x = camera_d * Math.sin(80 * Math.PI / 180);
+
+// Camera setup
+const camera = new THREE.PerspectiveCamera(30, width / height, 1, 1000);
+const camera_distance = 160;
+camera.position.z = camera_distance * Math.cos(80 * Math.PI / 180);
+camera.position.x = camera_distance * Math.sin(80 * Math.PI / 180);
 camera.up.set(0, 0, 1);
 camera.lookAt(new THREE.Vector3(0, 0, 0));
 
-var controls = new OrbitControls(camera, renderer.domElement);
+// Camera controls
+const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 controls.enableKeys = false;
 controls.minPolarAngle = controls.maxPolarAngle = conf.obs_angle * Math.PI / 180;
 
-/// Add the neutron star
-// var star_radius = 1.0;
-var star_geometry = new THREE.SphereGeometry(1.0, 64, 64);
-var star_material = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
-var star_mesh = new THREE.Mesh(star_geometry, star_material);
-scene.add(star_mesh);
-
-/// Add polarization limiting sphere
-var pl_geometry = new THREE.SphereGeometry(1.0, 64, 64);
-var pl_material = new THREE.MeshPhongMaterial({ color: 0xffffff,
-                                                transparent: true,
-                                                depthWrite: false,
-                                                // blending: THREE.AdditiveBlending,
-                                                blending: THREE.NormalBlending,
-                                              });
-pl_material.opacity = 0.3;
-var pl_mesh = new THREE.Mesh(pl_geometry, pl_material);
-pl_mesh.scale.setScalar(conf.pl_radius);
-scene.add(pl_mesh);
-
-/// Add a spin axis
-var axis_geometry = new THREE.BufferGeometry();
-const axis_vertices = new Float32Array( [
-  0, 0, -300,
-  0, 0, 300
-] );
-axis_geometry.setAttribute( 'position', new THREE.BufferAttribute( axis_vertices, 3 ) );
-var z_line = new THREE.Line(axis_geometry, new THREE.LineBasicMaterial({
-  color: 0x8080aa,
-  linewidth: 2.5,
-}));
-scene.add(z_line);
-
-// var axis_geometry2 = new THREE.BufferGeometry();
-// var axis_vertices2 = new Float32Array( [
-// 0, -conf.dipole_angle*(10/3), -300,
-// 0, conf.dipole_angle*(10/3), 300
-// ] );
-// axis_geometry2.setAttribute( 'position', new THREE.BufferAttribute( axis_vertices2, 3 ) );
-// var z_line2 = new THREE.Line(axis_geometry2, new THREE.LineBasicMaterial({
-// color: 0x0000ff,
-// linewidth: 2.5,
-// }));
-// scene.add(z_line2);
-
-
-// function set_axis(){
-//     var axis_geometry2 = new THREE.BufferGeometry();
-//     var axis_vertices2 = new Float32Array( [
-//         0, -300*Math.sin(conf.dipole_angle/180*Math.PI), -300*Math.cos(conf.dipole_angle/180*Math.PI),
-//         0, 300*Math.sin(conf.dipole_angle/180*Math.PI), 300*Math.cos(conf.dipole_angle/180*Math.PI),
-//         ] );
-//     axis_geometry2.setAttribute( 'position', new THREE.BufferAttribute( axis_vertices2, 3 ) );
-//     var z_line2 = new THREE.Line(axis_geometry2, new THREE.LineBasicMaterial({
-//         color: 0x0000ff,
-//         linewidth: 2.5,
-//         }));
-//         z_line2.name = "line";
-//     field_lines.add(z_line2);
-// }
-
-const loader = new THREE.TextureLoader();
-const texture = loader.load ('plasma2.jpg')
-
-function set_axis(){
-    var axis_geometry2 = new THREE.ConeGeometry(5, 100, 64, 32, true);  // Increased segments, capped
-    const material = new THREE.MeshPhongMaterial({
-        map: texture,
-        transparent: true,
-        opacity: 0.5,
-  depthWrite: false,
-        side: THREE.DoubleSide,
-        alphaTest: 0.1  // This helps remove artifacts
-    });
-
-    // compute translation in radians
-    const deltaRad = conf.translation_delta * Math.PI / 180;
-    // position the mesh (in world/local coordinates as needed)
-    const px = conf.translation_d * Math.sin(deltaRad) * Math.cos(0);
-    const py = conf.translation_d * Math.sin(deltaRad) * Math.sin(0);
-    const pz = conf.translation_d * Math.cos(deltaRad);
-    
-    var z_line2 = new THREE.Mesh(axis_geometry2, material );
-        z_line2.name = "line";
-    z_line2.rotateX(-(conf.dipole_angle/180*Math.PI+Math.PI/2));
-    z_line2.position.set(px, py, pz);
-    axis_geometry2.translate(0,-50,0);
-    field_lines.add(z_line2);
-
-    var axis_geometry3 = new THREE.ConeGeometry(5,100,50);
-    var z_line3 = new THREE.Mesh(axis_geometry3, material );
-        z_line3.name = "line";
-    z_line3.rotateX(-(conf.dipole_angle/180*Math.PI-Math.PI/2));
-    // axis_geometry3.center(0,0,0);
-    z_line3.position.set(px,py,pz);
-    axis_geometry3.translate(0,-50,0);
-    field_lines.add(z_line3);
-}
-
-/// Add lighting to the star and other meshes
-var directionalLight = new THREE.DirectionalLight(0xffffffff);
+// Lighting
+const directionalLight = new THREE.DirectionalLight(0xffffff);
 directionalLight.position.set(107, 107, 107);
 scene.add(directionalLight);
 
-var light = new THREE.AmbientLight(0x404040); // soft white light
-scene.add(light);
+const ambientLight = new THREE.AmbientLight(0x404040);
+scene.add(ambientLight);
 
-/// Defining a group for the field lines and polarization vectors
-var field_lines = new THREE.Group();
-var polarization_vectors = new THREE.Group();
-var intersect_points = [];
+// ============================================================================
+// 3D OBJECTS - Pulsar and Field Visualization
+// ============================================================================
 
-function clear_group(group) {
-  for (var i = group.children.length - 1; i >= 0; i--) {
-    if (group.children[i].name == "line") {
-      var obj = group.children[i];
-      obj.material.dispose();
-      obj.geometry.dispose();
-      group.remove(obj);
-    } else if (group.children[i].name == "arrow") {
-      var obj = group.children[i];
+// Pulsar sphere
+const pulsar_geometry = new THREE.SphereGeometry(1.0, 64, 64);
+const pulsar_material = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
+const pulsar_mesh = new THREE.Mesh(pulsar_geometry, pulsar_material);
+scene.add(pulsar_mesh);
+
+// Polarization limiting sphere (translucent)
+const pl_geometry = new THREE.SphereGeometry(1.0, 64, 64);
+const pl_material = new THREE.MeshPhongMaterial({ 
+  color: 0xffffff,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.NormalBlending,
+  opacity: 0.3
+});
+const pl_mesh = new THREE.Mesh(pl_geometry, pl_material);
+pl_mesh.scale.setScalar(conf.pl_radius);
+scene.add(pl_mesh);
+
+// Rotation axis (vertical line)
+const axis_geometry = new THREE.BufferGeometry();
+const axis_vertices = new Float32Array([0, 0, -300, 0, 0, 300]);
+axis_geometry.setAttribute('position', new THREE.BufferAttribute(axis_vertices, 3));
+const spin_axis = new THREE.Line(axis_geometry, new THREE.LineBasicMaterial({
+  color: 0x8080aa,
+  linewidth: 2.5,
+}));
+scene.add(spin_axis);
+
+// Groups for dynamic field lines and polarization vectors
+const field_lines = new THREE.Group();
+const polarization_vectors = new THREE.Group();
+const intersect_points = []; // Stores intersection points for polarization calculations
+
+scene.add(field_lines);
+scene.add(polarization_vectors);
+
+// ============================================================================
+// EMISSION CONE VISUALIZATION
+// ============================================================================
+
+// Load texture for emission cone
+const textureLoader = new THREE.TextureLoader();
+const plasma_texture = textureLoader.load('plasma.jpg');
+
+// Create emission cone visualization
+function createEmissionCone() {
+  const cone_material = new THREE.MeshPhongMaterial({
+    map: plasma_texture,
+    transparent: true,
+    opacity: 0.5,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    alphaTest: 0.1
+  });
+
+  // Compute cone position based on translation parameters
+  const deltaRad = conf.translation_delta * Math.PI / 180;
+  const px = conf.translation_d * Math.sin(deltaRad) * Math.cos(0);
+  const py = conf.translation_d * Math.sin(deltaRad) * Math.sin(0);
+  const pz = conf.translation_d * Math.cos(deltaRad);
+  
+  // Upper cone
+  const cone_geometry_upper = new THREE.ConeGeometry(5, 100, 64, 32, true);
+  const cone_upper = new THREE.Mesh(cone_geometry_upper, cone_material);
+  cone_upper.name = "line";
+  cone_upper.rotateZ(-conf.dipole_phase * Math.PI / 180);
+  cone_upper.rotateX(-(conf.dipole_angle / 180 * Math.PI + Math.PI / 2));
+  cone_upper.position.set(px, py, pz);
+  cone_geometry_upper.translate(0, -50, 0);
+  field_lines.add(cone_upper);
+
+  // Lower cone
+  const cone_geometry_lower = new THREE.ConeGeometry(5, 100, 50);
+  const cone_lower = new THREE.Mesh(cone_geometry_lower, cone_material);
+  cone_lower.name = "line";
+  cone_lower.rotateZ(-conf.dipole_phase * Math.PI / 180);
+  cone_lower.rotateX(-(conf.dipole_angle / 180 * Math.PI - Math.PI / 2));
+  cone_lower.position.set(px, py, pz);
+  cone_geometry_lower.translate(0, -50, 0);
+  field_lines.add(cone_lower);
+}
+
+// ============================================================================
+// OBSERVER TRAJECTORY CIRCLE
+// ============================================================================
+
+// Create circle showing observer's trajectory at polarization limiting radius
+const obs_circle_positions = [];
+const obs_circle_segments = 80;
+for (let i = 0; i <= obs_circle_segments; i++) {
+  const phi = i * 2.0 * Math.PI / obs_circle_segments;
+  obs_circle_positions.push(Math.cos(phi), Math.sin(phi), 0.0);
+}
+
+const obs_circle_geometry = new LineGeometry();
+obs_circle_geometry.setPositions(obs_circle_positions);
+
+const obs_circle_material = new LineMaterial({
+  color: 0x846204,
+  worldUnits: true,
+  linewidth: 0.10,
+  vertexColors: false,
+  dashed: false,
+  transparent: true,
+  opacity: 0.7,
+  blending: THREE.CustomBlending,
+});
+
+const obs_circle = new Line2(obs_circle_geometry, obs_circle_material);
+obs_circle.computeLineDistances();
+scene.add(obs_circle);
+obs_circle.scale.setScalar(conf.pl_radius * Math.sin(conf.obs_angle * Math.PI / 180));
+obs_circle.position.setZ(conf.pl_radius * Math.cos(conf.obs_angle * Math.PI / 180));
+
+// ============================================================================
+// MAGNETIC FIELD LINES
+// ============================================================================
+
+// Clear all objects with specific name from a group
+function clearGroup(group) {
+  for (let i = group.children.length - 1; i >= 0; i--) {
+    const obj = group.children[i];
+    if (obj.name === "line" || obj.name === "arrow") {
+      if (obj.material) obj.material.dispose();
+      if (obj.geometry) obj.geometry.dispose();
       group.remove(obj);
     }
   }
 }
 
-function create_fieldlines(th_obs, r_pl, n_lines, n_segments, d, delta) {
-  // clear the intersection points array first
+// Create dipole magnetic field lines
+function createFieldLines(theta_obs, radius_pl, num_lines, num_segments, offset_d, offset_delta) {
   intersect_points.length = 0;
-  for (var i = 0; i < n_lines; i++) {
-    var phi = i * 2.0 * Math.PI / n_lines;
-    // At r_pl, the angle of the intersection point is th_obs
-    var offset = new THREE.Vector3(d * Math.sin(delta) * Math.cos(phi),
-                                   d * Math.sin(delta) * Math.sin(phi),
-                                   d * Math.cos(delta));
+  
+  for (let i = 0; i < num_lines; i++) {
+    const phi = i * 2.0 * Math.PI / num_lines;
+    
+    // Calculate offset vector
+    const offset = new THREE.Vector3(
+      offset_d * Math.sin(offset_delta) * Math.cos(phi),
+      offset_d * Math.sin(offset_delta) * Math.sin(phi),
+      offset_d * Math.cos(offset_delta)
+    );
 
-    var p_intersect_lab = new THREE.Vector3(r_pl * Math.sin(th_obs) * Math.cos(phi),
-                                            r_pl * Math.sin(th_obs) * Math.sin(phi),
-                                            r_pl * Math.cos(th_obs));
-    // var p_copy = new THREE.Vector3();
-    // p_copy.copy(p_intersect);
-    // intersect_points.push(p_copy);
+    // Intersection point at polarization limiting radius (lab frame)
+    const p_intersect_lab = new THREE.Vector3(
+      radius_pl * Math.sin(theta_obs) * Math.cos(phi),
+      radius_pl * Math.sin(theta_obs) * Math.sin(phi),
+      radius_pl * Math.cos(theta_obs)
+    );
     
     intersect_points.push(p_intersect_lab.clone());
-    var p_intersect = p_intersect_lab.clone().sub(offset);
-    // Find the intersection point in the magnetic dipole frame
+    
+    // Transform to dipole frame
+    const p_intersect = p_intersect_lab.clone().sub(offset);
     p_intersect.applyQuaternion(q_dipole);
-    // Find the stellar footpoint theta
-    var r_local = p_intersect.length();
-    var cosArg = Math.max(-1, Math.min(1, p_intersect.z / r_local));
-    var th_intersect = Math.acos(cosArg);
-    //var th_intersect = Math.acos(p_intersect.z / r_pl);
-    //var th_foot = Math.asin(Math.sqrt(1.0 / r_pl * (Math.sin(th_intersect)**2)));
-    var s = Math.sin(th_intersect);
-  //var th_foot = Math.asin(Math.sqrt((1.0/r_local) * (s*s)));
-  //var r_max = 1.0 / (Math.sin(th_foot)**2);
-
-    var L = r_local / (Math.sin(th_intersect)**2);
-    var th_foot = Math.asin(Math.min(1,Math.sqrt(1.0/L)));
-    var r_max = L;
-    var phi_line = Math.atan2(p_intersect.y, p_intersect.x);
-    var line_pos = []
-    var colors = []
-    for (var j = 0; j <= n_segments; j++) {
-    //var th = th_foot + j * (Math.PI - 2.0 * th_foot) / n_segments;
-      var th = j * Math.PI / n_segments;
-      var r = L * Math.sin(th)**2;
-      var p = new THREE.Vector3(r * Math.sin(th) * Math.cos(phi_line),
-                                r * Math.sin(th) * Math.sin(phi_line),
-                                r * Math.cos(th));
-      // Rotate it back to the lab frame
+    
+    // Calculate field line parameters
+    const r_local = p_intersect.length();
+    const cosArg = Math.max(-1, Math.min(1, p_intersect.z / r_local));
+    const theta_intersect = Math.acos(cosArg);
+    
+    // Calculate L-shell parameter
+    const L = r_local / (Math.sin(theta_intersect) ** 2);
+    const phi_line = Math.atan2(p_intersect.y, p_intersect.x);
+    
+    // Generate field line points
+    const line_positions = [];
+    for (let j = 0; j <= num_segments; j++) {
+      const theta = j * Math.PI / num_segments;
+      const r = L * Math.sin(theta) ** 2;
+      const p = new THREE.Vector3(
+        r * Math.sin(theta) * Math.cos(phi_line),
+        r * Math.sin(theta) * Math.sin(phi_line),
+        r * Math.cos(theta)
+      );
+      // Transform back to lab frame
       p.applyQuaternion(q_dipole_inv);
       p.add(offset);
-      line_pos.push(p.x, p.y, p.z);
-      colors.push(0.1, 0.8, 0.1);
+      line_positions.push(p.x, p.y, p.z);
     }
+    
+    // Create field line geometry
     const line_geometry = new LineGeometry();
-    line_geometry.setPositions( line_pos );
-    line_geometry.setColors( colors );
-
-    //field line material
-    var line_matLine = new LineMaterial({
-        color: 0x7b2cbf,
-        // color: 0x3d34bb,
-        // color: 0x3d34bb,
-        vertexColors: false,
-        worldUnits: true,
-        linewidth: 0.10,
-        transparent: true,
-        opacity: 0.7,
-        alphaToCoverage: true,
-        blending: THREE.AdditiveBlending,
-        // blendintg: THREE.NormalBlending,
-        // blending: THREE.CustomBlending,
-        blendEquation: THREE.AddEquation,
-        blendSrc: THREE.SrcAlphaFactor,
-        blendDst:THREE.OneMinusSrcAlphaFactor,
-        // depthTest: false
+    line_geometry.setPositions(line_positions);
+    
+    // Field line material
+    const line_material = new LineMaterial({
+      color: 0x024A0D,
+      vertexColors: false,
+      worldUnits: true,
+      linewidth: 0.10,
+      transparent: true,
+      opacity: 0.7,
+      alphaToCoverage: true,
+      blending: THREE.AdditiveBlending,
+      blendEquation: THREE.AddEquation,
+      blendSrc: THREE.SrcAlphaFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
     });
 
-    var l = new Line2( line_geometry, line_matLine );
-    l.computeLineDistances();
-    l.name = "line";
-    field_lines.add(l);
+    const field_line = new Line2(line_geometry, line_material);
+    field_line.computeLineDistances();
+    field_line.name = "line";
+    field_lines.add(field_line);
   }
-  set_axis();
+  
+  createEmissionCone();
 }
 
-function create_polarization_vectors() {
-  var m = new THREE.Vector3(0, Math.sin(conf.dipole_angle * Math.PI / 180),
-                            Math.cos(conf.dipole_angle * Math.PI / 180));
-  // m.negate();
-  var r = conf.pl_radius * 10;
+// ============================================================================
+// POLARIZATION VECTORS
+// ============================================================================
+
+// Create 3D polarization arrows at intersection points
+function createPolarizationVectors() {
+  // Dipole moment direction in dipole frame (aligned with z' axis)
+  const dipole_moment_dipole_frame = new THREE.Vector3(0, 0, 1);
+  
+  // Transform dipole moment to lab frame using both alpha and beta rotations
+  const dipole_moment = dipole_moment_dipole_frame.clone().applyQuaternion(q_dipole_inv);
+  
+  const radius_cubed = Math.pow(conf.pl_radius * 10, 3);
+  const radius_fifth = Math.pow(conf.pl_radius * 10, 5);
 
   for (const p of intersect_points) {
-    var b = new THREE.Vector3();
-    b.copy(p);
-    b.multiplyScalar(3.0 * m.dot(p) / Math.pow(r, 5));
-    var b2 = new THREE.Vector3();
-    b2.copy(m);
-    b2.multiplyScalar(1.0 / Math.pow(r, 3));
+    // Calculate magnetic field direction
+    const b = p.clone().multiplyScalar(3.0 * dipole_moment.dot(p) / radius_fifth);
+    const b2 = dipole_moment.clone().multiplyScalar(1.0 / radius_cubed);
     b.sub(b2);
-    var dir = new THREE.Vector3();
+    
+    // Calculate polarization direction
+    let dir = new THREE.Vector3();
     dir.crossVectors(p, b);
     dir.normalize();
+    
     if (conf.o_mode) {
       dir.cross(p);
       dir.normalize();
     }
 
-    // create a 3D arrow (shaft + cone head) instead of ArrowHelper
-    const length = 3.0;
-    const headLength = Math.min(0.4 * length, 0.5);
-    const shaftLength = length - headLength;
-    const shaftRadius = 0.05;
-    const headRadius = 0.1;
+    // Create arrow geometry (shaft + cone head)
+    const arrow_length = 3.0;
+    const head_length = Math.min(0.4 * arrow_length, 0.5);
+    const shaft_length = arrow_length - head_length;
+    const shaft_radius = 0.05;
+    const head_radius = 0.1;
 
-    const arrowMaterial = new THREE.MeshPhongMaterial({ color: 0xf35b04 });
+    const arrow_material = new THREE.MeshPhongMaterial({ color: 0xBF3A0A });
 
-    // Shaft (cylinder) — align it so its base sits at origin and it points +Y
-    const shaftGeom = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLength, 8);
-    shaftGeom.translate(0, shaftLength / 2, 0);
-    const shaftMesh = new THREE.Mesh(shaftGeom, arrowMaterial);
+    // Shaft (cylinder)
+    const shaft_geometry = new THREE.CylinderGeometry(shaft_radius, shaft_radius, shaft_length, 8);
+    shaft_geometry.translate(0, shaft_length / 2, 0);
+    const shaft_mesh = new THREE.Mesh(shaft_geometry, arrow_material);
 
-    // Head (cone) — place it at the end of the shaft
-    const headGeom = new THREE.ConeGeometry(headRadius, headLength, 10);
-    headGeom.translate(0, shaftLength + headLength / 2, 0);
-    const headMesh = new THREE.Mesh(headGeom, arrowMaterial);
+    // Head (cone)
+    const head_geometry = new THREE.ConeGeometry(head_radius, head_length, 10);
+    head_geometry.translate(0, shaft_length + head_length / 2, 0);
+    const head_mesh = new THREE.Mesh(head_geometry, arrow_material);
 
-    // Group them into one object
+    // Combine into arrow group
     const arrow = new THREE.Group();
-    arrow.add(shaftMesh);
-    arrow.add(headMesh);
+    arrow.add(shaft_mesh);
+    arrow.add(head_mesh);
 
-    // Orient the group so its local +Y points along `dir`
+    // Orient arrow along polarization direction
     const up = new THREE.Vector3(0, 1, 0);
-    const q = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
-    arrow.setRotationFromQuaternion(q);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
+    arrow.setRotationFromQuaternion(quaternion);
 
-    // Position at intersection point p
     arrow.position.copy(p);
-
-    // Optionally scale and tweak appearance:
-    // arrow.scale.setScalar(1.0);
-    // shaftMesh.material.flatShading = true;
-    // headMesh.material.flatShading = true;
     arrow.name = "arrow";
     polarization_vectors.add(arrow);
   }
 }
 
-create_fieldlines(conf.obs_angle * Math.PI / 180, conf.pl_radius+conf.emission_h, 40, 100, conf.translation_d, conf.translation_delta * Math.PI/180);
-scene.add(field_lines);
-create_polarization_vectors();
-scene.add(polarization_vectors);
+// ============================================================================
+// UPDATE FUNCTIONS
+// ============================================================================
 
-function update_fieldline() {
-  update_quaternion();
-  // remove_fieldlines();
-  clear_group(field_lines);
-  clear_group(polarization_vectors);
-//   scene.remove(z_line2);
-  create_fieldlines(conf.obs_angle * Math.PI / 180, conf.pl_radius+conf.emission_h, 40, 100,conf.translation_d, conf.translation_delta * Math.PI/180);
-  create_polarization_vectors();
-//   set_axis();
-}
-
-/// A circle to visualize the trajectory of observing angle
-var obs_circ_pos = [];
-var obs_circ_n_segments = 80;
-for (var i = 0; i <= obs_circ_n_segments; i++) {
-  var phi = i * 2.0 * Math.PI / obs_circ_n_segments;
-  obs_circ_pos.push(Math.cos(phi), Math.sin(phi), 0.0);
-}
-const obs_circ_geometry = new LineGeometry();
-obs_circ_geometry.setPositions( obs_circ_pos );
-
-// obs line material
-var obs_circ_matLine = new LineMaterial( {
-//   color: 0xff7900,
-  color: 0xf7b801,
-  worldUnits: true,
-  linewidth: 0.10, // in world units with size attenuation, pixels otherwise
-  vertexColors: false,
-  // alphaTest: 0.5,
-  // depthTest: false,
-
-  // resolution:  to be set by renderer, eventually
-  dashed: false,
-  // alphaToCoverage: true,
-  transparent: true,
-  opacity: 0.7,
-  blending: THREE.CustomBlending,
-} );
-
-var obs_circ = new Line2( obs_circ_geometry, obs_circ_matLine );
-obs_circ.computeLineDistances();
-scene.add(obs_circ);
-obs_circ.scale.setScalar((conf.pl_radius+conf.emission_h) * Math.sin(conf.obs_angle * Math.PI / 180));
-obs_circ.position.setZ((conf.pl_radius+conf.emission_h) * Math.cos(conf.obs_angle * Math.PI / 180));
-
-function update_pl_sphere() {
+// Update polarization limiting sphere and field lines
+function updatePolarizationSphere() {
   pl_mesh.scale.setScalar(conf.pl_radius);
-  obs_circ.scale.setScalar((conf.pl_radius+conf.emission_h) * Math.sin(conf.obs_angle * Math.PI / 180));
-  obs_circ.position.setZ((conf.pl_radius + conf.emission_h) * Math.cos(conf.obs_angle * Math.PI / 180));
+  obs_circle.scale.setScalar(conf.pl_radius * Math.sin(conf.obs_angle * Math.PI / 180));
+  obs_circle.position.setZ(conf.pl_radius * Math.cos(conf.obs_angle * Math.PI / 180));
   controls.minPolarAngle = controls.maxPolarAngle = conf.obs_angle * Math.PI / 180;
-  update_fieldline();
+  updateFieldLines();
 }
 
+// Regenerate field lines and polarization vectors
+function updateFieldLines() {
+  updateQuaternion();
+  clearGroup(field_lines);
+  clearGroup(polarization_vectors);
+  createFieldLines(
+    conf.obs_angle * Math.PI / 180,
+    conf.pl_radius,
+    40,
+    100,
+    conf.translation_d,
+    conf.translation_delta * Math.PI / 180
+  );
+  createPolarizationVectors();
+}
 
-function switch_o_mode() {
+// Polarization mode switches
+function switchToOMode() {
   conf.o_mode = true;
   conf.x_mode = false;
-  update_fieldline();
+  updateFieldLines();
 }
 
-function switch_x_mode() {
+function switchToXMode() {
   conf.o_mode = false;
   conf.x_mode = true;
-  update_fieldline();
+  updateFieldLines();
 }
 
-function toggle_lock_observer() {
+function toggleLockObserver() {
   if (conf.lock_observer) {
     controls.minPolarAngle = controls.maxPolarAngle = conf.obs_angle * Math.PI / 180;
   } else {
@@ -421,204 +437,345 @@ function toggle_lock_observer() {
   }
 }
 
-// function toggle_rotate() {
-//   if (conf.rotating) {
-//     controls.autoRotate = true;
-//     controls.autoRotateSpeed = conf.rotation_speed;
-//   } else {
-//     controls.autoRotate = false;
-//   }
-// }
+// ============================================================================
+// GUI CONTROLS
+// ============================================================================
 
 const gui = new GUI();
-gui.add(conf, "obs_angle", 0.0, 90.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "pl_radius", 1.0, 10.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "dipole_angle", 0.0, 90.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "emission_h", 0.0, 1.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "translation_d", 0.0, 1.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "translation_delta", 0.0, 180.0).listen().onChange(update_pl_sphere);
-gui.add(conf, "rotation_speed", 0.0, 1).listen();
-gui.add(conf, "o_mode").listen().onChange(switch_o_mode);
-gui.add(conf, "x_mode").listen().onChange(switch_x_mode);
-gui.add(conf, "rotating").listen();
-gui.add(conf, "lock_observer").listen().onChange(toggle_lock_observer);
+
+// Customize GUI size with responsive units
+gui.domElement.style.width = '20vw';  // 20% of viewport width
+gui.domElement.style.minWidth = '280px';  // Minimum width to prevent too small
+gui.domElement.style.maxWidth = '400px';  // Maximum width to prevent too large
+gui.domElement.style.fontSize = '1em';  // Relative font size
+
+// Position GUI in upper right corner with no gaps
+gui.domElement.style.position = 'absolute';
+gui.domElement.style.top = '0px';
+gui.domElement.style.right = '0px';
+gui.domElement.style.margin = '0px';
+gui.domElement.style.padding = '0px';
+
+// Observer & Geometry
+gui.add(conf, "obs_angle", 0.0, 90.0).name("Line of Sight ζ (°)").listen().onChange(updatePolarizationSphere);
+
+// Magnetic Dipole Configuration
+gui.add(conf, "dipole_angle", 0.0, 90.0).name("Obliquity α (°)").listen().onChange(updatePolarizationSphere);
+gui.add(conf, "dipole_phase", 0.0, 360.0).name("Dipole Phase β (°)").listen().onChange(updatePolarizationSphere);
+
+// Off-Centering Parameters
+gui.add(conf, "translation_d", 0.0, 1.0).name("Offset Distance ε").listen().onChange(updatePolarizationSphere);
+gui.add(conf, "translation_delta", 0.0, 180.0).name("Offset Colatitude δ (°)").listen().onChange(updatePolarizationSphere);
+
+// Emission Properties
+// gui.add(conf, "emission_h", 0.0, 1.0).name("Emission Height η").listen().onChange(updatePolarizationSphere);
+gui.add(conf, "pl_radius", 1.0, 10.0).name("Emission Radius").listen().onChange(updatePolarizationSphere);
+
+// Polarization Modes
+gui.add(conf, "o_mode").name("O-Mode").listen().onChange(switchToOMode);
+gui.add(conf, "x_mode").name("X-Mode").listen().onChange(switchToXMode);
+
+// Animation Controls
+gui.add(conf, "rotation_speed", 0.0, 1).name("Rotation Speed");
+gui.add(conf, "rotating").name("Auto Rotate");
+gui.add(conf, "lock_observer").name("Lock to Observer").listen().onChange(toggleLockObserver);
 
 
-var guiFunctions = function () {
-  this.set_observer = function () {
-    camera.position.set(camera_d * Math.sin(conf.obs_angle * Math.PI / 180), 0,
-                        camera_d * Math.cos(conf.obs_angle * Math.PI / 180));
+// Camera position setter
+const guiFunctions = {
+  set_observer: function () {
+    camera.position.set(
+      camera_distance * Math.sin(conf.obs_angle * Math.PI / 180),
+      0,
+      camera_distance * Math.cos(conf.obs_angle * Math.PI / 180)
+    );
   }
-}
-var gui_func = new guiFunctions();
-gui.add(gui_func, "set_observer");
+};
+gui.add(guiFunctions, "set_observer");
 
-// var phase = Math.atan2(camera.position.y, camera.position.x) + Math.PI;
-var phase = Math.PI/2;
+// ============================================================================
+// ANIMATION LOOP
+// ============================================================================
 
-function animate() {
-  requestAnimationFrame(animate, canvas);
-  // stats.begin();
-  // if(!instance.active || sample_defaults.paused) return;
+// Phase tracker for rotation
+let phase = Math.PI / 2;
 
+function animate3DScene() {
+  requestAnimationFrame(animate3DScene);
+
+  // Rotate field lines and polarization vectors if enabled
   if (conf.rotating) {
-    field_lines.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), -conf.rotation_speed);
-    polarization_vectors.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), -conf.rotation_speed);
-    // z_line2.rotateOnWorldAxis(new THREE.Line(axis_geometry2, new THREE.LineBasicMaterial({
-    //     color: 0x0000ff,
-    //     linewidth: 2.5,
-    //   })), conf.rotation_speed);
-    // z_line2.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), conf.rotation_speed);
+    const rotation_axis = new THREE.Vector3(0, 0, 1);
+    field_lines.rotateOnWorldAxis(rotation_axis, -conf.rotation_speed);
+    polarization_vectors.rotateOnWorldAxis(rotation_axis, -conf.rotation_speed);
     phase += conf.rotation_speed;
-    phase = phase%(Math.PI*4);
+    phase = phase % (Math.PI * 4);
   }
-  // closed_lines.visible = conf.show_closed;
 
   renderer.render(scene, camera);
-  // var cam_phi0 = Math.atan2(camera.position.y, camera.position.x) + Math.PI;
   controls.update();
-  // stats.end();
-  // var cam_phi1 = Math.atan2(camera.position.y, camera.position.x) + Math.PI;
-  // phase = (phase + cam_phi1 - cam_phi0) % (Math.PI * 4);
 }
 
-animate();
+// Initialize field lines and start animation
+createFieldLines(
+  conf.obs_angle * Math.PI / 180,
+  conf.pl_radius,
+  40,
+  100,
+  conf.translation_d,
+  conf.translation_delta * Math.PI / 180
+);
+createPolarizationVectors();
+animate3DScene();
 
-//------------------------------------------------------------------------------------------------------------------------
+// ============================================================================
+// 2D PLOTS - POLARIZATION ANGLE AND INTENSITY
+// ============================================================================
 
-const canvas2 = document.getElementById("plot");
-
+// Canvas setup for 2D plots
+const pa_canvas = document.getElementById("plot1");      // Polarization angle plot
+const intensity_canvas = document.getElementById("plot2"); // Intensity plot
 const devicePixelRatio = window.devicePixelRatio || 1;
-canvas2.width = canvas2.clientWidth * devicePixelRatio;
-canvas2.height = canvas2.clientHeight * devicePixelRatio * 1.4;
 
-const numX = canvas2.width;
-const numY = canvas2.height;
+// Plot dimensions
+const numPoints_X = pa_canvas.width * 4;  // Number of points along x-axis
+const numPoints_Y = pa_canvas.height;     // Number of points along y-axis
 
-const color = new WebglPlotBundle.ColorRGBA(Math.random(), Math.random(), Math.random(), 1);
-// const red = new WebglPlotBundle.ColorRGBA(1,0,0,1);
-const red = new WebglPlotBundle.ColorRGBA(243/255, 91/255, 4/255, 1);
-const white = new WebglPlotBundle.ColorRGBA(1,1,1,1);
-const green = new WebglPlotBundle.ColorRGBA(0, 1, 0, 1);
+// ============================================================================
+// COLOR DEFINITIONS
+// ============================================================================
 
-const thickness = 0.01;
-// const line = new WebglPlotBundle.WebglLine(color, numX);
-const line = new WebglPlotBundle.WebglThickLine(white, numX, thickness);
-const line2 = new WebglPlotBundle.WebglThickLine(red, numY, thickness);
-const line3 = new WebglPlotBundle.WebglThickLine(green, numX, thickness);
+const colors = {
+  red: new WebglPlotBundle.ColorRGBA(243/255, 91/255, 4/255, 1),     // Phase marker
+  white: new WebglPlotBundle.ColorRGBA(1, 1, 1, 1),                   // Background PA
+  green: new WebglPlotBundle.ColorRGBA(0, 1, 0, 1),                   // Observed PA
+  blue: new WebglPlotBundle.ColorRGBA(26/255, 90/255, 217/255, 1),   // Intensity
+  yellow: new WebglPlotBundle.ColorRGBA(1, 1, 0, 1)                   // (Unused - for reference)
+};
 
-const wglp = new WebglPlotBundle.WebglPlot(canvas2);
+// ============================================================================
+// LINE DEFINITIONS
+// ============================================================================
 
-line.lineSpaceX(-1, 2 / numX);
-line2.lineSpaceX(-1, 2 / numY);
-line3.lineSpaceX(-1, 2 / numX);
-wglp.addThickLine(line);
-wglp.addThickLine(line2);
-wglp.addThickLine(line3);
+const line_thickness = 0.01;
 
-function newFrame() {
-  update();
-  wglp.update();
-  requestAnimationFrame(newFrame);
-}
-requestAnimationFrame(newFrame);
+// Polarization angle lines (split by intensity threshold)
+const pa_line_observed = new WebglPlotBundle.WebglThickLine(colors.green, numPoints_X, line_thickness);
+const pa_line_background = new WebglPlotBundle.WebglThickLine(colors.white, numPoints_X, line_thickness);
 
-function coneGaussianIntensity(k, theta_obs, theta_cone, dipole, phi, I0) {
-  const ax = Math.sin(dipole) * Math.cos(phi);
-  const ay = Math.sin(dipole) * Math.sin(phi);
-  const az = Math.cos(dipole);
+// Phase marker lines (vertical red line showing current rotation phase)
+const phase_marker_pa = new WebglPlotBundle.WebglThickLine(colors.red, numPoints_Y, line_thickness);
+const phase_marker_intensity = new WebglPlotBundle.WebglThickLine(colors.red, numPoints_Y, line_thickness);
 
+// Intensity line
+const intensity_line = new WebglPlotBundle.WebglThickLine(colors.blue, numPoints_X, line_thickness);
+
+// ============================================================================
+// WEBGL PLOT INITIALIZATION
+// ============================================================================
+
+// Create plot instances
+const pa_plot = new WebglPlotBundle.WebglPlot(pa_canvas);           // PA plot
+const intensity_plot = new WebglPlotBundle.WebglPlot(intensity_canvas); // Intensity plot
+
+// Initialize X-axis spacing for all lines
+pa_line_observed.lineSpaceX(-1, 2 / numPoints_X);
+pa_line_background.lineSpaceX(-1, 2 / numPoints_X);
+phase_marker_pa.lineSpaceX(-1, 2 / numPoints_Y);
+intensity_line.lineSpaceX(-1, 2 / numPoints_X);
+phase_marker_intensity.lineSpaceX(-1, 2 / numPoints_Y);
+
+// Adjust intensity plot vertical offset (show range 0-2 instead of -1 to 1)
+intensity_plot.gOffsetY = -0.5;
+
+// Add lines to plots
+pa_plot.addThickLine(pa_line_observed);
+pa_plot.addThickLine(pa_line_background);
+pa_plot.addThickLine(phase_marker_pa);
+
+intensity_plot.addThickLine(intensity_line);
+intensity_plot.addThickLine(phase_marker_intensity);
+
+// ============================================================================
+// PHYSICS CALCULATIONS
+// ============================================================================
+
+/**
+ * Calculate Gaussian cone intensity profile
+ * @param {number} theta_obs - Observer angle (radians)
+ * @param {number} theta_cone - Cone opening angle (radians)
+ * @param {number} dipole_angle - Dipole angle (radians)
+ * @param {number} dipole_phase - Dipole phase (radians)
+ * @param {number} phi - Rotation phase (radians)
+ * @param {number} I0 - Peak intensity
+ * @returns {number} Intensity at given position
+ */
+function calculateConeIntensity(theta_obs, theta_cone, dipole_angle, dipole_phase, phi, I0) {
+  phi += dipole_phase;
+  // Cone axis direction
+  const ax = Math.sin(dipole_angle) * Math.cos(phi);
+  const ay = Math.sin(dipole_angle) * Math.sin(phi);
+  const az = Math.cos(dipole_angle);
+
+  // Observer position (on xz-plane)
   const r = 1.0;
   const rx = r * Math.sin(theta_obs);
-  const ry = 0; // Point on xz plane
+  const ry = 0;
   const rz = r * Math.cos(theta_obs);
 
-  const zp = (rx * ax + rz * az); 
-  const r_perp_sq = (rx * rx + rz * rz) - zp * zp;
+  // Perpendicular distance from cone axis
+  const projection = rx * ax + rz * az;
+  const r_perp_squared = Math.abs((rx * rx + rz * rz) - projection * projection);
 
-  const sigma = Math.abs(Math.pow(k * zp * Math.tan(theta_cone + 1e-8), 2));
+  // Gaussian width parameter
+  const sigma = 0.2 * 2 * Math.pow(Math.tan(theta_cone + 1e-8), 2);
 
-  const intensity = I0 * Math.exp(-r_perp_sq / (2 * sigma));
-
-  return intensity;
+  // Gaussian intensity profile
+  return I0 * Math.exp(-r_perp_squared / sigma);
 }
 
+/**
+ * Calculate polarization angle using DRVM formula
+ * @param {number} phi - Rotation phase (radians)
+ * @param {number} dipole_angle - Dipole angle (degrees)
+ * @param {number} obs_angle - Observer angle (degrees)
+ * @param {number} emission_h - Emission height
+ * @param {number} translation_d - Translation distance
+ * @param {number} translation_delta - Translation angle (degrees)
+ * @param {boolean} o_mode - True for O-mode, false for X-mode
+ * @returns {number} Polarization angle (radians)
+ */
+function calculatePolarizationAngle(phi, dipole_angle, dipole_phase, obs_angle, pl_radius, translation_d, translation_delta, o_mode) {
+  // Convert to radians
+  const alpha = dipole_angle * Math.PI / 180;
+  const beta = dipole_phase * Math.PI / 180;
+  const xi = obs_angle * Math.PI / 180;
+  const delta = translation_delta * Math.PI / 180;
+  
+  // DRVM parameters
+  const eta = pl_radius;
+  const epsilon = translation_d;
 
+  // DRVM equation components (Eq. 11 from DRVM paper)
+  const numerator = (1 + eta - epsilon * Math.cos(delta) * Math.cos(xi)) * Math.sin(alpha) * Math.sin(beta + phi)
+                  + epsilon * Math.sin(delta) * (Math.cos(alpha) * Math.cos(xi) * Math.sin(phi) 
+                  - Math.sin(alpha) * Math.sin(beta) * Math.sin(xi));
+                  
+  const denominator = (1 + eta) * (Math.cos(alpha) * Math.sin(xi) - Math.sin(alpha) * Math.cos(xi) * Math.cos(beta + phi))
+                    + epsilon * (Math.sin(alpha) * Math.cos(delta) * Math.cos(beta + phi) 
+                    - Math.cos(alpha) * Math.sin(delta) * Math.cos(phi));
 
-function update() {
-  const freq = 0.002;
-  const amp = 0.4; // (1/pi)*0.8
-  const noise = 0.00;
-  const cam_phi = Math.atan2(camera.position.y, camera.position.x) + Math.PI;
-
-  for (let i = 0; i < line.numPoints; i++) {
-    const rad_dipole = conf.dipole_angle/180*Math.PI; // alpha
-    const rad_obs = conf.obs_angle/180*Math.PI;
-    const x = -1 + i * 2 / numX;
-    const phi = 2.0 * Math.PI * (x + 1);
-
-    const eta = conf.emission_h;
-    const eps = conf.translation_d;
-    const xi = rad_obs;
-    const delta = conf.translation_delta * Math.PI/180;
-    const beta = 90/180 * Math.PI;
-
-    const eq11a = (1 + eta - eps * Math.cos(delta) * Math.cos(xi)) * Math.sin(rad_dipole) * Math.sin(beta + phi)
-                  + eps * Math.sin(delta) * (Math.cos(rad_dipole) * Math.cos(xi) * Math.sin(phi) - Math.sin(rad_dipole) * Math.sin(beta) * Math.sin(xi));
-    const eq11b = (1 + eta) * (Math.cos(rad_dipole) * Math.sin(xi) - Math.sin(rad_dipole) * Math.cos(xi) * Math.cos(beta +phi))
-                      + eps * (Math.sin(rad_dipole) * Math.cos(delta) * Math.cos(beta + phi) - Math.cos(rad_dipole) * Math.sin(delta) * Math.cos(phi)); 
-
-    if (conf.o_mode){
-
-        // const ySin = Math.atan((Math.sin(rad_dipole) * Math.sin(phi))/
-        //                        (Math.cos(rad_obs) * Math.sin(rad_dipole)*Math.cos(phi)-Math.sin(rad_obs)*Math.cos(rad_dipole)));
-       
-        const ySin = Math.atan((eq11a)/(eq11b));
-
-        // const ySin = Math.sin(Math.PI * i * freq * Math.PI * 2)-conf.dipole_angle/180;
-        const yNoise = Math.random() - 0.5;
-        line.setY(i, ySin * amp + yNoise * noise);
+  if (o_mode) {
+    // O-mode (ordinary) polarization
+    return Math.atan(numerator / denominator);
+  } else {
+    // X-mode (extraordinary) polarization
+    let pa = Math.atan(numerator / denominator) + Math.PI / 2;
+    if (pa > Math.PI / 2) {
+      pa = pa - Math.PI;
     }
-    else{
- 
-        var ySin = Math.atan((eq11a)/(eq11b)) + Math.PI/2;
-
-        //var ySin = (Math.atan((Math.sin(rad_dipole) * Math.sin(phi))/
-        //                       (Math.cos(rad_obs) * Math.sin(rad_dipole)*Math.cos(phi)-Math.sin(rad_obs)*Math.cos(rad_dipole))))+Math.PI/2;
-        if (ySin>Math.PI/2){
-            ySin = ySin-(Math.PI);
-        }
-        // const ySin = Math.sin(Math.PI * i * freq * Math.PI * 2)-conf.dipole_angle/180;
-        const yNoise = Math.random() - 0.5;
-        line.setY(i, ySin * amp + yNoise * noise);
-    }
-    // line.setX(i, xx);
-  }
-  for (let i =0; i<line2.numPoints; i++){
-    // const angle=(cam_phi+phase)%(Math.PI*4)+(Math.PI/2);
-    // const angle=(phase)%(Math.PI*4)+(Math.PI/2);
-    const angle=(cam_phi + phase)%(Math.PI*4);
-    const x = angle/(Math.PI*4)*2-1;  // Scale to match 4π range
-    //const x = angle/(2*Math.PI)-1;
-    line2.setX(i, x);
-    line2.setY(i, -1 + i * 2 / numX);
-  }
-  for (let i = 0; i<line3.numPoints; i++){
-     // Fixed parameters for cone intensity calculation
-    const x = -1 + i * 2 / numX;
-    const phi = 2.0 * Math.PI * (x + 1);
-    const k = 0.3;                                    // 
-    const theta = conf.obs_angle * Math.PI / 180;  // observation angle
-    const beta2 = Math.PI / 6;                 // cone opening angle
-    const dipole = conf.dipole_angle * Math.PI / 180; // dipole angle
-    const I0 = 1;                                   // peak intensity
-    const intensity = coneGaussianIntensity(k, theta, beta2, dipole, phi, I0);
-    line3.setY(i, intensity *2);
-   
+    return pa;
   }
 }
 
-//------------------------------------------------------------------------------------------------------------------------
+// ============================================================================
+// PLOT UPDATE FUNCTION
+// ============================================================================
+
+/**
+ * Update all 2D plot lines based on current configuration
+ */
+function update2DPlots() {
+  const noise_amplitude = 0.01;
+  const pa_amplitude = 0.4;
+  const camera_phi = Math.atan2(camera.position.y, camera.position.x) + Math.PI;
+  
+  // Intensity threshold for masking PA (1% of peak)
+  const I0 = 1;
+  const intensity_threshold = 0.01 * I0;
+  
+  // Pre-calculate all PA and intensity values
+  const intensity_array = new Array(numPoints_X);
+  const pa_array = new Array(numPoints_X);
+  
+  for (let i = 0; i < numPoints_X; i++) {
+    const x = -1 + i * 2 / numPoints_X;
+    const phi = 2.0 * Math.PI * (x + 1);
+    
+    // Calculate polarization angle
+    const pa = calculatePolarizationAngle(
+      phi,
+      conf.dipole_angle,
+      conf.dipole_phase,
+      conf.obs_angle,
+      conf.pl_radius,
+      conf.translation_d,
+      conf.translation_delta,
+      conf.o_mode
+    );
+    pa_array[i] = pa * pa_amplitude + (Math.random() - 0.5) * noise_amplitude;
+    
+    // Calculate intensity
+    const theta = conf.obs_angle * Math.PI / 180;
+    const theta_cone = Math.PI / 18;  // Fixed cone angle
+    const dipole_angle = conf.dipole_angle * Math.PI / 180;
+    const dipole_phase = conf.dipole_phase * Math.PI / 180;
+    intensity_array[i] = calculateConeIntensity(theta, theta_cone, dipole_angle, dipole_phase, phi, I0);
+  }
+  
+  // Set PA lines based on intensity threshold
+  for (let i = 0; i < numPoints_X; i++) {
+    if (intensity_array[i] > intensity_threshold) {
+      // High intensity region: show observed PA (green), hide background
+      pa_line_observed.setY(i, pa_array[i]);
+      pa_line_background.setY(i, NaN);
+    } else {
+      // Low intensity region: show background PA (white), hide observed
+      pa_line_observed.setY(i, NaN);
+      pa_line_background.setY(i, pa_array[i]);
+    }
+  }
+
+  // Update phase marker on PA plot (vertical red line)
+  for (let i = 0; i < phase_marker_pa.numPoints; i++) {
+    const angle = (camera_phi + phase) % (Math.PI * 4);
+    const x = angle / (Math.PI * 4) * 2 - 1;  // Scale to [-1, 1] range
+    phase_marker_pa.setX(i, x);
+    phase_marker_pa.setY(i, -1 + i * 2 / numPoints_Y);
+  }
+
+  // Update intensity line
+  for (let i = 0; i < intensity_line.numPoints; i++) {
+    intensity_line.setY(i, intensity_array[i] + (Math.random() - 0.5) * noise_amplitude);
+  }
+
+  // Update phase marker on intensity plot
+  for (let i = 0; i < phase_marker_intensity.numPoints; i++) {
+    const angle = (camera_phi + phase) % (Math.PI * 4);
+    const x = angle / (Math.PI * 4) * 2 - 1;
+    phase_marker_intensity.setX(i, x);
+    phase_marker_intensity.setY(i, -1 + i * 2 / numPoints_Y + 0.5);
+  }
+}
+
+// ============================================================================
+// 2D PLOT ANIMATION LOOP
+// ============================================================================
+
+function animate2DPlots() {
+  update2DPlots();
+  pa_plot.update();
+  intensity_plot.update();
+  requestAnimationFrame(animate2DPlots);
+}
+
+animate2DPlots();
+
+// ============================================================================
+// WEBGL PLOT BUNDLE (External Library)
+// ============================================================================
+// Note: The WebglPlotBundle is included inline here for convenience.
+// In production, this should be loaded as a separate module.
 
 (function (global, factory) {
   typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
@@ -627,96 +784,22 @@ function update() {
 })(this, (function (exports) { 'use strict';
 
   class ColorRGBA {
-      r;
-      g;
-      b;
-      a;
+      r; g; b; a;
       constructor(r, g, b, a) {
-          this.r = r;
-          this.g = g;
-          this.b = b;
-          this.a = a;
+          this.r = r; this.g = g; this.b = b; this.a = a;
       }
   }
 
-  /**
-   * Baseline class
-   */
   class WebglBase {
-      //private static program: WebGLProgram;
-      intensity;
-      visible;
-      /**
-       * The number of data point pairs in the line
-       */
-      numPoints;
-      /**
-       * The data ponits for webgl array
-       * @internal
-       */
-      xy;
-      /**
-       * The Color of the line
-       */
-      color;
-      /**
-       * The horizontal scale of the line
-       * @default = 1
-       */
-      scaleX;
-      /**
-       * The vertical scale of the line
-       * @default = 1
-       */
-      scaleY;
-      /**
-       * The horizontal offset of the line
-       * @default = 0
-       */
-      offsetX;
-      /**
-       * the vertical offset of the line
-       * @default = 0
-       */
-      offsetY;
-      /**
-       * if this is a close loop line or not
-       * @default = false
-       */
-      loop;
-      /**
-       * total webgl number of points
-       * @internal
-       */
-      webglNumPoints;
-      /**
-       * @private
-       * @internal
-       */
-      _vbuffer;
-      /**
-       * @private
-       * @internal
-       */
-      //public _prog: WebGLProgram;
-      /**
-       * @private
-       * @internal
-       */
-      _coord;
-      /**
-       * @internal
-       */
+      intensity; visible; numPoints; xy; color;
+      scaleX; scaleY; offsetX; offsetY; loop;
+      webglNumPoints; _vbuffer; _coord;
+      
       constructor() {
-          this.scaleX = 1;
-          this.scaleY = 1;
-          this.offsetX = 0;
-          this.offsetY = 0;
-          this.loop = false;
-          this._vbuffer = 0;
-          this._coord = 0;
-          this.visible = true;
-          this.intensity = 1;
+          this.scaleX = 1; this.scaleY = 1;
+          this.offsetX = 0; this.offsetY = 0;
+          this.loop = false; this._vbuffer = 0; this._coord = 0;
+          this.visible = true; this.intensity = 1;
           this.xy = new Float32Array([]);
           this.numPoints = 0;
           this.color = new ColorRGBA(0, 0, 0, 1);
@@ -724,22 +807,8 @@ function update() {
       }
   }
 
-  /**
-   * The standard Line class
-   */
   class WebglLine extends WebglBase {
       currentIndex = 0;
-      /**
-       * Create a new line
-       * @param c - the color of the line
-       * @param numPoints - number of data pints
-       * @example
-       * ```typescript
-       * x= [0,1]
-       * y= [1,2]
-       * line = new WebglLine( new ColorRGBA(0.1,0.1,0.1,1), 2);
-       * ```
-       */
       constructor(c, numPoints) {
           super();
           this.webglNumPoints = numPoints;
@@ -747,81 +816,19 @@ function update() {
           this.color = c;
           this.xy = new Float32Array(2 * this.webglNumPoints);
       }
-      /**
-       * Set the X value at a specific index
-       * @param index - the index of the data point
-       * @param x - the horizontal value of the data point
-       */
-      setX(index, x) {
-          this.xy[index * 2] = x;
-      }
-      /**
-       * Set the Y value at a specific index
-       * @param index : the index of the data point
-       * @param y : the vertical value of the data point
-       */
-      setY(index, y) {
-          this.xy[index * 2 + 1] = y;
-      }
-      /**
-       * Get an X value at a specific index
-       * @param index - the index of X
-       */
-      getX(index) {
-          return this.xy[index * 2];
-      }
-      /**
-       * Get an Y value at a specific index
-       * @param index - the index of Y
-       */
-      getY(index) {
-          return this.xy[index * 2 + 1];
-      }
-      /**
-       * Make an equally spaced array of X points
-       * @param start  - the start of the series
-       * @param stepSize - step size between each data point
-       *
-       * @example
-       * ```typescript
-       * //x = [-1, -0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8]
-       * const numX = 10;
-       * line.lineSpaceX(-1, 2 / numX);
-       * ```
-       */
+      setX(index, x) { this.xy[index * 2] = x; }
+      setY(index, y) { this.xy[index * 2 + 1] = y; }
+      getX(index) { return this.xy[index * 2]; }
+      getY(index) { return this.xy[index * 2 + 1]; }
       lineSpaceX(start, stepSize) {
           for (let i = 0; i < this.numPoints; i++) {
-              // set x to -num/2:1:+num/2
               this.setX(i, start + stepSize * i);
           }
       }
-      /**
-       * Automatically generate X between -1 and 1
-       * equal to lineSpaceX(-1, 2/ number of points)
-       */
-      arrangeX() {
-          this.lineSpaceX(-1, 2 / this.numPoints);
-      }
-      /**
-       * Set a constant value for all Y values in the line
-       * @param c - constant value
-       */
+      arrangeX() { this.lineSpaceX(-1, 2 / this.numPoints); }
       constY(c) {
-          for (let i = 0; i < this.numPoints; i++) {
-              // set x to -num/2:1:+num/2
-              this.setY(i, c);
-          }
+          for (let i = 0; i < this.numPoints; i++) { this.setY(i, c); }
       }
-      /**
-       * Add a new Y values to the end of current array and shift it, so that the total number of the pair remains the same
-       * @param data - the Y array
-       *
-       * @example
-       * ```typescript
-       * yArray = new Float32Array([3, 4, 5]);
-       * line.shiftAdd(yArray);
-       * ```
-       */
       shiftAdd(data) {
           const shiftSize = data.length;
           for (let i = 0; i < this.numPoints - shiftSize; i++) {
@@ -831,9 +838,6 @@ function update() {
               this.setY(i + this.numPoints - shiftSize, data[i]);
           }
       }
-      /**
-       * Add new Y values to the line and maintain the position of the last data point
-       */
       addArrayY(yArray) {
           if (this.currentIndex + yArray.length <= this.numPoints) {
               for (let i = 0; i < yArray.length; i++) {
@@ -842,9 +846,6 @@ function update() {
               }
           }
       }
-      /**
-       * Replace the all Y values of the line
-       */
       replaceArrayY(yArray) {
           if (yArray.length == this.numPoints) {
               for (let i = 0; i < this.numPoints; i++) {
@@ -854,21 +855,7 @@ function update() {
       }
   }
 
-  /**
-   * The step based line plot
-   */
   class WebglStep extends WebglBase {
-      /**
-       * Create a new step line
-       * @param c - the color of the line
-       * @param numPoints - number of data pints
-       * @example
-       * ```typescript
-       * x= [0,1]
-       * y= [1,2]
-       * line = new WebglStep( new ColorRGBA(0.1,0.1,0.1,1), 2);
-       * ```
-       */
       constructor(c, num) {
           super();
           this.webglNumPoints = num * 2;
@@ -876,64 +863,21 @@ function update() {
           this.color = c;
           this.xy = new Float32Array(2 * this.webglNumPoints);
       }
-      /**
-       * Set the Y value at a specific index
-       * @param index - the index of the data point
-       * @param y - the vertical value of the data point
-       */
       setY(index, y) {
           this.xy[index * 4 + 1] = y;
           this.xy[index * 4 + 3] = y;
       }
-      getX(index) {
-          return this.xy[index * 4];
-      }
-      /**
-       * Get an X value at a specific index
-       * @param index - the index of X
-       */
-      getY(index) {
-          return this.xy[index * 4 + 1];
-      }
-      /**
-       * Make an equally spaced array of X points
-       * @param start  - the start of the series
-       * @param stepSize - step size between each data point
-       *
-       * @example
-       * ```typescript
-       * //x = [-1, -0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8]
-       * const numX = 10;
-       * line.lineSpaceX(-1, 2 / numX);
-       * ```
-       */
+      getX(index) { return this.xy[index * 4]; }
+      getY(index) { return this.xy[index * 4 + 1]; }
       lineSpaceX(start, stepsize) {
           for (let i = 0; i < this.numPoints; i++) {
-              // set x to -num/2:1:+num/2
               this.xy[i * 4] = start + i * stepsize;
               this.xy[i * 4 + 2] = start + (i * stepsize + stepsize);
           }
       }
-      /**
-       * Set a constant value for all Y values in the line
-       * @param c - constant value
-       */
       constY(c) {
-          for (let i = 0; i < this.numPoints; i++) {
-              // set x to -num/2:1:+num/2
-              this.setY(i, c);
-          }
+          for (let i = 0; i < this.numPoints; i++) { this.setY(i, c); }
       }
-      /**
-       * Add a new Y values to the end of current array and shift it, so that the total number of the pair remains the same
-       * @param data - the Y array
-       *
-       * @example
-       * ```typescript
-       * yArray = new Float32Array([3, 4, 5]);
-       * line.shiftAdd(yArray);
-       * ```
-       */
       shiftAdd(data) {
           const shiftSize = data.length;
           for (let i = 0; i < this.numPoints - shiftSize; i++) {
@@ -946,193 +890,79 @@ function update() {
   }
 
   class WebglPolar extends WebglBase {
-      numPoints;
-      xy;
-      color;
-      intenisty;
-      visible;
-      offsetTheta;
+      numPoints; xy; color; intenisty; visible; offsetTheta;
       constructor(c, numPoints) {
           super();
-          this.webglNumPoints = numPoints;
-          this.numPoints = numPoints;
-          this.color = c;
-          this.intenisty = 1;
+          this.webglNumPoints = numPoints; this.numPoints = numPoints;
+          this.color = c; this.intenisty = 1;
           this.xy = new Float32Array(2 * this.webglNumPoints);
-          this._vbuffer = 0;
-          this._coord = 0;
-          this.visible = true;
-          this.offsetTheta = 0;
+          this._vbuffer = 0; this._coord = 0;
+          this.visible = true; this.offsetTheta = 0;
       }
-      /**
-       * @param index: index of the line
-       * @param theta : angle in deg
-       * @param r : radius
-       */
       setRtheta(index, theta, r) {
-          //const rA = Math.abs(r);
-          //const thetaA = theta % 360;
           const x = r * Math.cos((2 * Math.PI * (theta + this.offsetTheta)) / 360);
           const y = r * Math.sin((2 * Math.PI * (theta + this.offsetTheta)) / 360);
-          //const index = Math.round( ((theta % 360)/360) * this.numPoints );
           this.setX(index, x);
           this.setY(index, y);
       }
-      getTheta(index) {
-          //return Math.tan
-          return 0;
-      }
+      getTheta(index) { return 0; }
       getR(index) {
-          //return Math.tan
           return Math.sqrt(Math.pow(this.getX(index), 2) + Math.pow(this.getY(index), 2));
       }
-      setX(index, x) {
-          this.xy[index * 2] = x;
-      }
-      setY(index, y) {
-          this.xy[index * 2 + 1] = y;
-      }
-      getX(index) {
-          return this.xy[index * 2];
-      }
-      getY(index) {
-          return this.xy[index * 2 + 1];
-      }
+      setX(index, x) { this.xy[index * 2] = x; }
+      setY(index, y) { this.xy[index * 2 + 1] = y; }
+      getX(index) { return this.xy[index * 2]; }
+      getY(index) { return this.xy[index * 2 + 1]; }
   }
 
-  /**
-   * The Square class
-   */
   class WebglSquare extends WebglBase {
-      /**
-       * Create a new line
-       * @param c - the color of the line
-       * @example
-       * ```typescript
-       * line = new WebglSquare( new ColorRGBA(0.1,0.1,0.1,0.5) );
-       * ```
-       */
       constructor(c) {
           super();
-          this.webglNumPoints = 4;
-          this.numPoints = 4;
+          this.webglNumPoints = 4; this.numPoints = 4;
           this.color = c;
           this.xy = new Float32Array(2 * this.webglNumPoints);
       }
-      /**
-       * draw a square
-       * @param x1 start x
-       * @param y1 start y
-       * @param x2 end x
-       * @param y2 end y
-       */
       setSquare(x1, y1, x2, y2) {
           this.xy = new Float32Array([x1, y1, x1, y2, x2, y1, x2, y2]);
       }
   }
 
-  /**
-   * modified functions from:
-   * https://github.com/stackgl/gl-vec2
-   * See License2.md for more info
-   */
+  // Vector math utilities
   const scaleAndAdd = (a, b, scale) => {
-      const out = { x: 0, y: 0 };
-      out.x = a.x + b.x * scale;
-      out.y = a.y + b.y * scale;
-      return out;
+      return { x: a.x + b.x * scale, y: a.y + b.y * scale };
   };
   const normal = (dir) => {
-      //get perpendicular
-      const out = set(-dir.y, dir.x);
-      return out;
+      return { x: -dir.y, y: dir.x };
   };
   const direction = (a, b) => {
-      //get unit dir of two lines
       let out = subtract(a, b);
-      out = normalize(out);
-      return out;
+      return normalize(out);
   };
-  /**
-   * Adds two vec2's
-   *
-   * @param {vec2} out the receiving vector
-   * @param {vec2} a the first operand
-   * @param {vec2} b the second operand
-   * @returns {vec2} out
-   */
   const add = (a, b) => {
-      const out = { x: 0, y: 0 };
-      out.x = a.x + b.x;
-      out.y = a.y + b.y;
-      return out;
+      return { x: a.x + b.x, y: a.y + b.y };
   };
-  /**
-   * Calculates the dot product of two vec2's
-   *
-   * @param {vec2} a the first operand
-   * @param {vec2} b the second operand
-   * @returns {Number} dot product of a and b
-   */
   const dot = (a, b) => {
       return a.x * b.x + a.y * b.y;
   };
-  /**
-   * Normalize a vec2
-   *
-   * @param {vec2} out the receiving vector
-   * @param {vec2} a vector to normalize
-   * @returns {vec2} out
-   */
   const normalize = (a) => {
       const out = { x: 0, y: 0 };
       let len = a.x * a.x + a.y * a.y;
       if (len > 0) {
-          //TODO: evaluate use of glm_invsqrt here?
           len = 1 / Math.sqrt(len);
           out.x = a.x * len;
           out.y = a.y * len;
       }
       return out;
   };
-  /**
-   * Set the components of a vec2 to the given values
-   *
-   * @param {vec2} out the receiving vector
-   * @param {Number} x X component
-   * @param {Number} y Y component
-   * @returns {vec2} out
-   */
   const set = (x, y) => {
-      const out = { x: 0, y: 0 };
-      out.x = x;
-      out.y = y;
-      return out;
+      return { x: x, y: y };
   };
-  /**
-   * Subtracts vector b from vector a
-   *
-   * @param {vec2} out the receiving vector
-   * @param {vec2} a the first operand
-   * @param {vec2} b the second operand
-   * @returns {vec2} out
-   */
   const subtract = (a, b) => {
-      const out = { x: 0, y: 0 };
-      out.x = a.x - b.x;
-      out.y = a.y - b.y;
-      return out;
+      return { x: a.x - b.x, y: a.y - b.y };
   };
 
-  /**
-   * inspired and modified from:
-   * https://github.com/mattdesl/polyline-normals
-   * See License1.md for more info
-   */
   const PolyLine = (lineXY) => {
-      let curNormal;
-      let lineA = { x: 0, y: 0 };
-      let lineB = { x: 0, y: 0 };
+      let curNormal, lineA = { x: 0, y: 0 }, lineB = { x: 0, y: 0 };
       const out = [];
       const addNext = (normal, length) => {
           out.push({ vec2: normal, miterLength: length });
@@ -1140,7 +970,6 @@ function update() {
       const getXY = (index) => {
           return { x: lineXY[index * 2], y: lineXY[index * 2 + 1] };
       };
-      // add initial normals
       lineA = direction(getXY(1), getXY(0));
       curNormal = normal(lineA);
       addNext(curNormal, 1);
@@ -1152,52 +981,29 @@ function update() {
           lineA = direction(cur, last);
           curNormal = normal(lineA);
           lineB = direction(next, cur);
-          //stores tangent & miter
           const miter = computeMiter(lineA, lineB);
           const miterLen = computeMiterLen(lineA, miter, 1);
           addNext(miter, miterLen);
       }
-      // add last normal
-      // no miter, simple segment
       lineA = direction(getXY(numPoints - 1), getXY(numPoints - 2));
-      curNormal = normal(lineA); //reset normal
+      curNormal = normal(lineA);
       addNext(curNormal, 1);
       return out;
   };
   const computeMiter = (lineA, lineB) => {
-      //get tangent line
       let tangent = add(lineA, lineB);
       tangent = normalize(tangent);
-      //get miter as a unit vector
-      const miter = set(-tangent.y, tangent.x);
-      return miter;
+      return set(-tangent.y, tangent.x);
   };
   const computeMiterLen = (lineA, miter, halfThick) => {
       const tmp = set(-lineA.y, lineA.x);
-      //get the necessary length of our miter
       return halfThick / dot(miter, tmp);
   };
 
-  /**
-   * The standard Line class
-   */
   class WebglThickLine extends WebglBase {
       currentIndex = 0;
-      //protected triPoints: Float32Array;
-      _linePoints;
-      _thicknessRequested = 0;
-      _actualThickness = 0;
-      /**
-       * Create a new line
-       * @param c - the color of the line
-       * @param numPoints - number of data pints
-       * @example
-       * ```typescript
-       * x= [0,1]
-       * y= [1,2]
-       * line = new WebglLine( new ColorRGBA(0.1,0.1,0.1,1), 2);
-       * ```
-       */
+      _linePoints; _thicknessRequested = 0; _actualThickness = 0;
+      
       constructor(c, numPoints, thickness) {
           super();
           this.webglNumPoints = numPoints * 2;
@@ -1205,15 +1011,11 @@ function update() {
           this.color = c;
           this._thicknessRequested = thickness;
           this._linePoints = new Float32Array(numPoints * 2);
-          //this.triPoints = new Float32Array(this.numPoints * 4);
           this.xy = new Float32Array(2 * this.webglNumPoints);
       }
       convertToTriPoints() {
-          //const thick = 0.01;
           const halfThick = this._actualThickness / 2;
           const normals = PolyLine(this._linePoints);
-          //console.log(this.linePoints);
-          //console.log(normals);
           for (let i = 0; i < this.numPoints; i++) {
               const x = this._linePoints[2 * i];
               const y = this._linePoints[2 * i + 1];
@@ -1226,166 +1028,28 @@ function update() {
               this.xy[i * 4 + 3] = bot.y;
           }
       }
-      /**
-       * Set the X value at a specific index
-       * @param index - the index of the data point
-       * @param x - the horizontal value of the data point
-       */
-      setX(index, x) {
-          this._linePoints[index * 2] = x;
-      }
-      /**
-       * Set the Y value at a specific index
-       * @param index : the index of the data point
-       * @param y : the vertical value of the data point
-       */
-      setY(index, y) {
-          this._linePoints[index * 2 + 1] = y;
-      }
-      /**
-       * Make an equally spaced array of X points
-       * @param start  - the start of the series
-       * @param stepSize - step size between each data point
-       *
-       * @example
-       * ```typescript
-       * //x = [-1, -0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8]
-       * const numX = 10;
-       * line.lineSpaceX(-1, 2 / numX);
-       * ```
-       */
+      setX(index, x) { this._linePoints[index * 2] = x; }
+      setY(index, y) { this._linePoints[index * 2 + 1] = y; }
       lineSpaceX(start, stepSize) {
           for (let i = 0; i < this.numPoints; i++) {
-              // set x to -num/2:1:+num/2
               this.setX(i, start + stepSize * i);
           }
       }
-      setThickness(thickness) {
-          this._thicknessRequested = thickness;
-      }
-      getThickness() {
-          return this._thicknessRequested;
-      }
-      setActualThickness(thickness) {
-          this._actualThickness = thickness;
-      }
+      setThickness(thickness) { this._thicknessRequested = thickness; }
+      getThickness() { return this._thicknessRequested; }
+      setActualThickness(thickness) { this._actualThickness = thickness; }
   }
 
-  /**
-   * Author Danial Chitnis 2019-20
-   *
-   * inspired by:
-   * https://codepen.io/AzazelN28
-   * https://www.tutorialspoint.com/webgl/webgl_modes_of_drawing.htm
-   */
-  /**
-   * The main class for the webgl-plot library
-   */
   class WebglPlot {
-      /**
-       * @private
-       */
-      webgl;
-      /**
-       * Global horizontal scale factor
-       * @default = 1.0
-       */
-      gScaleX;
-      /**
-       * Global vertical scale factor
-       * @default = 1.0
-       */
-      gScaleY;
-      /**
-       * Global X/Y scale ratio
-       * @default = 1
-       */
-      gXYratio;
-      /**
-       * Global horizontal offset
-       * @default = 0
-       */
-      gOffsetX;
-      /**
-       * Global vertical offset
-       * @default = 0
-       */
-      gOffsetY;
-      /**
-       * Global log10 of x-axis
-       * @default = false
-       */
-      gLog10X;
-      /**
-       * Global log10 of y-axis
-       * @default = false
-       */
-      gLog10Y;
-      /**
-       * collection of data lines in the plot
-       */
-      _linesData;
-      /**
-       * collection of auxiliary lines (grids, markers, etc) in the plot
-       */
-      _linesAux;
-      _thickLines;
-      _surfaces;
-      get linesData() {
-          return this._linesData;
-      }
-      get linesAux() {
-          return this._linesAux;
-      }
-      get thickLines() {
-          return this._thickLines;
-      }
-      get surfaces() {
-          return this._surfaces;
-      }
-      _progLine;
-      /**
-       * log debug output
-       */
-      debug = false;
-      /**
-       * Create a webgl-plot instance
-       * @param canvas - the canvas in which the plot appears
-       * @param debug - (Optional) log debug messages to console
-       *
-       * @example
-       *
-       * For HTMLCanvas
-       * ```typescript
-       * const canvas = document.getElementbyId("canvas");
-       *
-       * const devicePixelRatio = window.devicePixelRatio || 1;
-       * canvas.width = canvas.clientWidth * devicePixelRatio;
-       * canvas.height = canvas.clientHeight * devicePixelRatio;
-       *
-       * const webglp = new WebGLplot(canvas);
-       * ...
-       * ```
-       * @example
-       *
-       * For OffScreenCanvas
-       * ```typescript
-       * const offscreen = htmlCanvas.transferControlToOffscreen();
-       *
-       * offscreen.width = htmlCanvas.clientWidth * window.devicePixelRatio;
-       * offscreen.height = htmlCanvas.clientHeight * window.devicePixelRatio;
-       *
-       * const worker = new Worker("offScreenCanvas.js", { type: "module" });
-       * worker.postMessage({ canvas: offscreen }, [offscreen]);
-       * ```
-       * Then in offScreenCanvas.js
-       * ```typescript
-       * onmessage = function (evt) {
-       * const wglp = new WebGLplot(evt.data.canvas);
-       * ...
-       * }
-       * ```
-       */
+      webgl; gScaleX; gScaleY; gXYratio; gOffsetX; gOffsetY;
+      gLog10X; gLog10Y; _linesData; _linesAux; _thickLines; _surfaces;
+      _progLine; debug = false;
+      
+      get linesData() { return this._linesData; }
+      get linesAux() { return this._linesAux; }
+      get thickLines() { return this._thickLines; }
+      get surfaces() { return this._surfaces; }
+      
       constructor(canvas, options) {
           if (options == undefined) {
               this.webgl = canvas.getContext("webgl", {
@@ -1405,31 +1069,18 @@ function update() {
           }
           this.log("canvas type is: " + canvas.constructor.name);
           this.log(`[webgl-plot]:width=${canvas.width}, height=${canvas.height}`);
-          this._linesData = [];
-          this._linesAux = [];
-          this._thickLines = [];
-          this._surfaces = [];
-          //this.webgl = webgl;
-          this.gScaleX = 1;
-          this.gScaleY = 1;
-          this.gXYratio = 1;
-          this.gOffsetX = 0;
-          this.gOffsetY = 0;
-          this.gLog10X = false;
-          this.gLog10Y = false;
-          // Clear the color
+          this._linesData = []; this._linesAux = [];
+          this._thickLines = []; this._surfaces = [];
+          this.gScaleX = 1; this.gScaleY = 1; this.gXYratio = 1;
+          this.gOffsetX = 0; this.gOffsetY = 0;
+          this.gLog10X = false; this.gLog10Y = false;
           this.webgl.clear(this.webgl.COLOR_BUFFER_BIT);
-          // Set the view port
           this.webgl.viewport(0, 0, canvas.width, canvas.height);
           this._progLine = this.webgl.createProgram();
           this.initThinLineProgram();
-          //https://learnopengl.com/Advanced-OpenGL/Blending
           this.webgl.enable(this.webgl.BLEND);
           this.webgl.blendFunc(this.webgl.SRC_ALPHA, this.webgl.ONE_MINUS_SRC_ALPHA);
       }
-      /**
-       * updates and redraws the content of the plot
-       */
       _drawLines(lines) {
           const webgl = this.webgl;
           lines.forEach((line) => {
@@ -1437,9 +1088,7 @@ function update() {
                   webgl.useProgram(this._progLine);
                   const uscale = webgl.getUniformLocation(this._progLine, "uscale");
                   webgl.uniformMatrix2fv(uscale, false, new Float32Array([
-                      line.scaleX * this.gScaleX * (this.gLog10X ? 1 / Math.log(10) : 1),
-                      0,
-                      0,
+                      line.scaleX * this.gScaleX * (this.gLog10X ? 1 / Math.log(10) : 1), 0, 0,
                       line.scaleY * this.gScaleY * this.gXYratio * (this.gLog10Y ? 1 / Math.log(10) : 1),
                   ]));
                   const uoffset = webgl.getUniformLocation(this._progLine, "uoffset");
@@ -1460,9 +1109,7 @@ function update() {
                   webgl.useProgram(this._progLine);
                   const uscale = webgl.getUniformLocation(this._progLine, "uscale");
                   webgl.uniformMatrix2fv(uscale, false, new Float32Array([
-                      square.scaleX * this.gScaleX * (this.gLog10X ? 1 / Math.log(10) : 1),
-                      0,
-                      0,
+                      square.scaleX * this.gScaleX * (this.gLog10X ? 1 / Math.log(10) : 1), 0, 0,
                       square.scaleY * this.gScaleY * this.gXYratio * (this.gLog10Y ? 1 / Math.log(10) : 1),
                   ]));
                   const uoffset = webgl.getUniformLocation(this._progLine, "uoffset");
@@ -1482,9 +1129,7 @@ function update() {
           webgl.useProgram(this._progLine);
           const uscale = webgl.getUniformLocation(this._progLine, "uscale");
           webgl.uniformMatrix2fv(uscale, false, new Float32Array([
-              thickLine.scaleX * this.gScaleX * (this.gLog10X ? 1 / Math.log(10) : 1),
-              0,
-              0,
+              thickLine.scaleX * this.gScaleX * (this.gLog10X ? 1 / Math.log(10) : 1), 0, 0,
               thickLine.scaleY * this.gScaleY * this.gXYratio * (this.gLog10Y ? 1 / Math.log(10) : 1),
           ]));
           const uoffset = webgl.getUniformLocation(this._progLine, "uoffset");
@@ -1493,10 +1138,8 @@ function update() {
           webgl.uniform2iv(isLog, new Int32Array([0, 0]));
           const uColor = webgl.getUniformLocation(this._progLine, "uColor");
           webgl.uniform4fv(uColor, [
-              thickLine.color.r,
-              thickLine.color.g,
-              thickLine.color.b,
-              thickLine.color.a,
+              thickLine.color.r, thickLine.color.g,
+              thickLine.color.b, thickLine.color.a,
           ]);
           webgl.drawArrays(webgl.TRIANGLE_STRIP, 0, thickLine.xy.length / 2);
       }
@@ -1504,53 +1147,29 @@ function update() {
           this._thickLines.forEach((thickLine) => {
               if (thickLine.visible) {
                   const calibFactor = Math.min(this.gScaleX, this.gScaleY);
-                  //const calibFactor = 10;
-                  //console.log(thickLine.getThickness());
                   thickLine.setActualThickness(thickLine.getThickness() / calibFactor);
                   thickLine.convertToTriPoints();
                   this._drawTriangles(thickLine);
               }
           });
       }
-      /**
-       * Draw and clear the canvas
-       */
       update() {
           this.clear();
           this.draw();
       }
-      /**
-       * Draw without clearing the canvas
-       */
       draw() {
           this._drawLines(this.linesData);
           this._drawLines(this.linesAux);
           this._drawThickLines();
           this._drawSurfaces(this.surfaces);
       }
-      /**
-       * Clear the canvas
-       */
       clear() {
-          //this.webgl.clearColor(0.1, 0.1, 0.1, 1.0);
           this.webgl.clear(this.webgl.COLOR_BUFFER_BIT);
       }
-      /**
-       * adds a line to the plot
-       * @param line - this could be any of line, linestep, histogram, or polar
-       *
-       * @example
-       * ```typescript
-       * const line = new line(color, numPoints);
-       * wglp.addLine(line);
-       * ```
-       */
       _addLine(line) {
-          //line.initProgram(this.webgl);
           line._vbuffer = this.webgl.createBuffer();
           this.webgl.bindBuffer(this.webgl.ARRAY_BUFFER, line._vbuffer);
           this.webgl.bufferData(this.webgl.ARRAY_BUFFER, line.xy, this.webgl.STREAM_DRAW);
-          //this.webgl.bindBuffer(this.webgl.ARRAY_BUFFER, line._vbuffer);
           line._coord = this.webgl.getAttribLocation(this._progLine, "coordinates");
           this.webgl.vertexAttribPointer(line._coord, 2, this.webgl.FLOAT, false, 0, 0);
           this.webgl.enableVertexAttribArray(line._coord);
@@ -1578,20 +1197,15 @@ function update() {
     uniform mat2 uscale;
     uniform vec2 uoffset;
     uniform ivec2 is_log;
-
     void main(void) {
        float x = (is_log[0]==1) ? log(coordinates.x) : coordinates.x;
        float y = (is_log[1]==1) ? log(coordinates.y) : coordinates.y;
        vec2 line = vec2(x, y);
        gl_Position = vec4(uscale*line + uoffset, 0.0, 1.0);
     }`;
-          // Create a vertex shader object
           const vertShader = this.webgl.createShader(this.webgl.VERTEX_SHADER);
-          // Attach vertex shader source code
           this.webgl.shaderSource(vertShader, vertCode);
-          // Compile the vertex shader
           this.webgl.compileShader(vertShader);
-          // Fragment shader source code
           const fragCode = `
        precision mediump float;
        uniform highp vec4 uColor;
@@ -1606,40 +1220,13 @@ function update() {
           this.webgl.attachShader(this._progLine, fragShader);
           this.webgl.linkProgram(this._progLine);
       }
-      /**
-       * remove the last data line
-       */
-      popDataLine() {
-          this.linesData.pop();
-      }
-      /**
-       * remove all the lines
-       */
+      popDataLine() { this.linesData.pop(); }
       removeAllLines() {
-          this._linesData = [];
-          this._linesAux = [];
-          this._thickLines = [];
-          this._surfaces = [];
+          this._linesData = []; this._linesAux = [];
+          this._thickLines = []; this._surfaces = [];
       }
-      /**
-       * remove all data lines
-       */
-      removeDataLines() {
-          this._linesData = [];
-      }
-      /**
-       * remove all auxiliary lines
-       */
-      removeAuxLines() {
-          this._linesAux = [];
-      }
-      /**
-       * Change the WbGL viewport
-       * @param a
-       * @param b
-       * @param c
-       * @param d
-       */
+      removeDataLines() { this._linesData = []; }
+      removeAuxLines() { this._linesAux = []; }
       viewport(a, b, c, d) {
           this.webgl.viewport(a, b, c, d);
       }
@@ -1660,30 +1247,30 @@ function update() {
 
 }));
 
-//-----------------------------------------------------------------------------------------------
+// ============================================================================
+// UNUSED CODE (Commented out for reference)
+// ============================================================================
 
-const canvas3 = document.getElementById("chart");
-
+/*
+// Chart.js scatter plot (unused)
 const xyValues = [
     {x:0, y:-1},
     {x:0, y:1}
-  ];
+];
 
-
-  const color1 = new WebglPlotBundle.ColorRGBA(0,0.1,0.1,0.5);
+const color1 = new WebglPlotBundle.ColorRGBA(0,0.1,0.1,0.5);
 
 new Chart("chart", {
     type: "scatter",
     data: {},
-      options: {
+    options: {
         scales: {
-          xAxes: [{ticks: {min: 0, max:1},display:false}],
-          yAxes: [{ticks: {min: -1, max:1}, display:true,gridLines: {
-            display: true         
-          }}],
+            xAxes: [{ticks: {min: 0, max:1},display:false}],
+            yAxes: [{ticks: {min: -1, max:1}, display:true,gridLines: {
+                display: true         
+            }}],
         },
         responsive: false,
-        //maintainAspectRatio: true
     }
-        
-  });
+});
+*/
