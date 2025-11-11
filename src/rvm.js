@@ -31,6 +31,7 @@ const Config = function () {
   
   // Animation parameters
   this.rotation_speed = 0.01;      // Speed of pulsar rotation
+  this.nfield_lines = 15;		   // Number of magnetic field lines
   
   // Display modes
   this.x_mode = false;             // Show X-mode (extraordinary) polarization
@@ -407,7 +408,7 @@ function updateFieldLines() {
   createFieldLines(
     conf.obs_angle * Math.PI / 180,
     conf.pl_radius,
-    40,
+    conf.nfield_lines,
     100,
     conf.translation_d,
     conf.translation_delta * Math.PI / 180
@@ -457,28 +458,29 @@ gui.domElement.style.margin = '0px';
 gui.domElement.style.padding = '0px';
 
 // Observer & Geometry
-gui.add(conf, "obs_angle", 0.0, 90.0).name("Line of Sight ζ (°)").listen().onChange(updatePolarizationSphere);
+gui.add(conf, "obs_angle", 0.0, 90.0).name("Line of Sight ζ (°)").onChange(updatePolarizationSphere);
 
 // Magnetic Dipole Configuration
-gui.add(conf, "dipole_angle", 0.0, 90.0).name("Obliquity α (°)").listen().onChange(updatePolarizationSphere);
-gui.add(conf, "dipole_phase", 0.0, 360.0).name("Dipole Phase β (°)").listen().onChange(updatePolarizationSphere);
+gui.add(conf, "dipole_angle", 0.0, 90.0).name("Obliquity α (°)").onChange(updatePolarizationSphere);
+gui.add(conf, "dipole_phase", 0.0, 360.0).name("Dipole Phase β (°)").onChange(updatePolarizationSphere);
 
 // Off-Centering Parameters
-gui.add(conf, "translation_d", 0.0, 1.0).name("Offset Distance ε").listen().onChange(updatePolarizationSphere);
-gui.add(conf, "translation_delta", 0.0, 180.0).name("Offset Colatitude δ (°)").listen().onChange(updatePolarizationSphere);
+gui.add(conf, "translation_d", 0.0, 1.0).name("Offset Distance ε").onChange(updatePolarizationSphere);
+gui.add(conf, "translation_delta", 0.0, 180.0).name("Offset Colatitude δ (°)").onChange(updatePolarizationSphere);
 
 // Emission Properties
-// gui.add(conf, "emission_h", 0.0, 1.0).name("Emission Height η").listen().onChange(updatePolarizationSphere);
-gui.add(conf, "pl_radius", 1.0, 10.0).name("Emission Radius").listen().onChange(updatePolarizationSphere);
+// gui.add(conf, "emission_h", 0.0, 1.0).name("Emission Height η").onChange(updatePolarizationSphere);
+gui.add(conf, "pl_radius", 1.0, 10.0).name("Emission Radius").onChange(updatePolarizationSphere);
 
 // Polarization Modes
-gui.add(conf, "o_mode").name("O-Mode").listen().onChange(switchToOMode);
-gui.add(conf, "x_mode").name("X-Mode").listen().onChange(switchToXMode);
+gui.add(conf, "o_mode").name("O-Mode").onChange(switchToOMode);
+gui.add(conf, "x_mode").name("X-Mode").onChange(switchToXMode);
 
 // Animation Controls
 gui.add(conf, "rotation_speed", 0.0, 1).name("Rotation Speed");
+gui.add(conf, "nfield_lines", 2, 45).name("Number of Field Lines").onChange(updatePolarizationSphere);
 gui.add(conf, "rotating").name("Auto Rotate");
-gui.add(conf, "lock_observer").name("Lock to Observer").listen().onChange(toggleLockObserver);
+gui.add(conf, "lock_observer").name("Lock to Observer").onChange(toggleLockObserver);
 
 
 // Camera position setter
@@ -520,7 +522,7 @@ function animate3DScene() {
 createFieldLines(
   conf.obs_angle * Math.PI / 180,
   conf.pl_radius,
-  40,
+  conf.nfield_lines,
   100,
   conf.translation_d,
   conf.translation_delta * Math.PI / 180
